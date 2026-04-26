@@ -65,6 +65,7 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "First try to answer using only the Slack thread conversation and the F3 Nation app docs via file search. " +
   "For questions or comments about F3 Wichita TechQ / ITQ Chubbs, or about who created or built you, the system instructions are sufficient context; answer those directly without requiring file search or web search. " +
   "For harmless humor requests about Chubbs, answer with a respectful generic line rather than claiming the documents do not mention him. " +
+  "Do not include file citations, source markers, annotation tokens, or file-search citation markup in the final answer. " +
   "Do not answer from general knowledge in this pass. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
   "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
@@ -72,6 +73,7 @@ const VECTOR_ONLY_INSTRUCTIONS =
 const WEB_FALLBACK_INSTRUCTIONS =
   "Use the Slack thread conversation plus the tools provided for this response pass. " +
   "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
+  "Do not include source markers, annotation tokens, or citation markup in the final answer. " +
   "If the allowed websites do not contain the answer, say so and ask one targeted question.";
 
 function pickRandom(arr) {
@@ -121,6 +123,19 @@ function buildResponseTools({ includeFileSearch = true, includeWebSearch = false
 
 function needsWebSearch(reply = "") {
   return reply.trim() === "NEED_WEB_SEARCH";
+}
+
+function sanitizeModelReply(text = "") {
+  return text
+    .replace(/[\uE000-\uF8FF]filecite:[^\s.,;!?]+/g, "")
+    .replace(/[\uE000-\uF8FF]cite:[^\s.,;!?]+/g, "")
+    .replace(/[\uE000-\uF8FF]+/g, "")
+    .replace(/\bfilecite:[^\s.,;!?]+/g, "")
+    .replace(/\bcite:[^\s.,;!?]+/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([.,;:!?])/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function nowIso() {
@@ -368,7 +383,7 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
     tools: buildResponseTools({ includeFileSearch: true }),
   });
 
-  const vectorReply = (vectorResp.output_text || "").trim();
+  const vectorReply = sanitizeModelReply(vectorResp.output_text || "");
   if (!needsWebSearch(vectorReply)) {
     return {
       text: vectorReply || "I couldn't generate a response.",
@@ -400,7 +415,7 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
   });
 
   return {
-    text: (webResp.output_text || "").trim() || "I couldn't generate a response.",
+    text: sanitizeModelReply(webResp.output_text || "") || "I couldn't generate a response.",
     source: "web_search",
   };
 }
