@@ -300,7 +300,9 @@ Mention the bot in Slack from an allowed channel:
 @bot What are the AO naming rules?
 ```
 
-The bot reads the current Slack thread, searches the vector store first, and replies in-thread. If the thread plus vector store do not contain enough information, it falls back to OpenAI web search over `WEB_SEARCH_ALLOWED_DOMAINS`. If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies with a short nudge to use an allowed channel.
+The bot reads the current Slack thread, searches the vector store first, and replies in-thread. If the thread plus vector store do not contain enough information, it falls back to OpenAI web search over `WEB_SEARCH_ALLOWED_DOMAINS`. If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies that it is not enabled in that channel.
+
+F3PO should not invent Slack channel names. If it cannot answer an F3 Wichita tech or IT question, it should use the vector store docs to identify the current Tech Q / IT Q and suggest contacting that person.
 
 After the bot has replied in a thread, it can also answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event. It first checks whether the bot already participated, skips obvious acknowledgements like "thanks" or "got it", and uses OpenAI to decide whether ambiguous follow-ups are really directed at the bot.
 

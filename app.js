@@ -39,19 +39,22 @@ const slackChannelCache = new Map();
 const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
 const MAX_CHARS_PER_MESSAGE = 2000;
 
-const SNARKY_REPLIES = [
-  "👀 PAX, take this to #tech-help. That’s the designated AO for questions like this.",
-  "🫡 Respectfully: wrong channel. Bring it to #tech-help so we can stay on mission.",
-  "🥾 Let’s not mumblechatter in here—post it in #tech-help and tag me there.",
-  "📣 Hold up, HIM. I only operate in #tech-help. Re-post there and we’ll get after it.",
-  "⏱️ Time hack: ask me in #tech-help. That’s where the tech PAX are congregating.",
+const CHANNEL_BLOCKED_REPLIES = [
+  "👀 Bold move, PAX. I’m not enabled to answer in this channel.",
+  "🫡 Respectfully: wrong AO for F3PO. I’m not enabled to answer here.",
+  "🥾 Easy there. I’m not on Q for this channel.",
+  "📣 Hold up, HIM. I’m not enabled to answer in this channel.",
+  "⏱️ Time hack: I can’t answer here.",
 ];
 
 const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
-  "You are the designated Q for #tech-help, here to keep PAX off the injury list and out of the wrong menu. " +
+  "You help F3 Wichita PAX answer questions using Slack thread context, F3 documents, and approved web sources. " +
   "Be concise, practical, and lightly dry-humored. " +
-  "Stay on topic. Do not drift to discussing non-F3 topics.";
+  "Stay on topic. Do not drift to discussing non-F3 topics. " +
+  "Do not invent Slack channels, and do not tell users to post in a channel. " +
+  "If you cannot answer an F3 Wichita tech or IT question, use the documents to identify the current Tech Q / IT Q and suggest contacting that person. " +
+  "If the Tech Q / IT Q is unknown, say to contact the current Tech Q / IT Q rather than naming a channel.";
 
 const VECTOR_ONLY_INSTRUCTIONS =
   "Use the Slack thread conversation plus the tools provided for this response pass. " +
@@ -464,9 +467,9 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       "debug"
     );
 
-    // 1) Restrict to #tech-help (but reply elsewhere with a nudge)
+    // 1) Restrict to configured channels.
     if (!isChannelAllowed(event.channel)) {
-      const nudge = pickRandom(SNARKY_REPLIES);
+      const nudge = pickRandom(CHANNEL_BLOCKED_REPLIES);
       logBlock(
         "APP MENTION BLOCKED",
         {
