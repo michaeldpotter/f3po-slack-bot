@@ -24,6 +24,11 @@ const ALLOWED_CHANNEL_IDS = parseAllowedChannelIds(
 );
 const VECTOR_STORE_ID = requireEnv("VECTOR_STORE_ID");
 const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
+  process.env.WEB_SEARCH_ALLOWED_DOMAINS
+);
+const slackUserCache = new Map();
+const slackChannelCache = new Map();
 
 // Basic safety: keep thread context bounded
 const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
@@ -39,24 +44,129 @@ const SNARKY_REPLIES = [
 
 const BOT_INSTRUCTIONS =
   "You are the designated Q for #tech-help—here to keep PAX off the injury list (and out of the wrong menu). " +
-  "Answer using (1) the Slack thread conversation and (2) the F3 Nation app docs via file search. " +
+  "Answer using the Slack thread conversation plus the tools provided for this response pass. " +
   "Be concise, practical, and lightly dry-humored. " +
-  "If the docs don’t contain the answer, say so and ask one targeted question. " +
   "Stay on topic. Do not drift to discussing non-F3 topics.";
+
+const VECTOR_ONLY_INSTRUCTIONS =
+  BOT_INSTRUCTIONS +
+  "First try to answer using only the Slack thread conversation and the F3 Nation app docs via file search. " +
+  "Do not answer from general knowledge in this pass. " +
+  "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
+  "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
+
+const WEB_FALLBACK_INSTRUCTIONS =
+  BOT_INSTRUCTIONS +
+  "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
+  "If the allowed websites do not contain the answer, say so and ask one targeted question.";
 
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function parseAllowedChannelIds(value = "") {
+function parseCommaSeparatedList(value = "") {
   return value
     .split(",")
-    .map((id) => id.trim())
+    .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseAllowedChannelIds(value = "") {
+  return parseCommaSeparatedList(value);
 }
 
 function isChannelAllowed(channel) {
   return ALLOWED_CHANNEL_IDS.length === 0 || ALLOWED_CHANNEL_IDS.includes(channel);
+}
+
+function buildResponseTools({ includeFileSearch = true, includeWebSearch = false } = {}) {
+  const tools = [];
+
+  if (includeFileSearch) {
+    tools.push({
+      type: "file_search",
+      vector_store_ids: [VECTOR_STORE_ID],
+    });
+  }
+
+  if (includeWebSearch && WEB_SEARCH_ALLOWED_DOMAINS.length > 0) {
+    tools.push({
+      type: "web_search",
+      filters: {
+        allowed_domains: WEB_SEARCH_ALLOWED_DOMAINS,
+      },
+    });
+  }
+
+  return tools;
+}
+
+function needsWebSearch(reply = "") {
+  return reply.trim() === "NEED_WEB_SEARCH";
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function logLine(label, value = "") {
+  console.log(`[${nowIso()}] ${label}${value ? ` ${value}` : ""}`);
+}
+
+function logBlock(title, fields = {}) {
+  console.log(`\n[${nowIso()}] ${title}`);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null || value === "") continue;
+    console.log(`  ${key}: ${value}`);
+  }
+}
+
+function formatTextForLog(text = "") {
+  return cleanSlackText(text).replace(/<@([\w]+)>/g, "@$1");
+}
+
+async function getSlackUserLabel(client, userId) {
+  if (!userId) return "unknown";
+  if (slackUserCache.has(userId)) return slackUserCache.get(userId);
+
+  try {
+    const res = await client.users.info({ user: userId });
+    const user = res.user || {};
+    const label = user.profile?.display_name || user.profile?.real_name || user.name || userId;
+    const value = `${label} (${userId})`;
+    slackUserCache.set(userId, value);
+    return value;
+  } catch (err) {
+    slackUserCache.set(userId, userId);
+    return userId;
+  }
+}
+
+async function getSlackChannelLabel(client, channelId) {
+  if (!channelId) return "unknown";
+  if (slackChannelCache.has(channelId)) return slackChannelCache.get(channelId);
+
+  try {
+    const res = await client.conversations.info({ channel: channelId });
+    const channel = res.channel || {};
+    const prefix = channel.is_private ? "private" : "public";
+    const label = channel.name ? `#${channel.name}` : channelId;
+    const value = `${label} (${prefix}, ${channelId})`;
+    slackChannelCache.set(channelId, value);
+    return value;
+  } catch (err) {
+    slackChannelCache.set(channelId, channelId);
+    return channelId;
+  }
+}
+
+async function getSlackContextLabels(client, channelId, userId) {
+  const [channel, user] = await Promise.all([
+    getSlackChannelLabel(client, channelId),
+    getSlackUserLabel(client, userId),
+  ]);
+
+  return { channel, user };
 }
 
 function cleanSlackText(text = "") {
@@ -141,31 +251,62 @@ async function generateReply(client, channel, threadTs, botUserId) {
   const threadMessages = await fetchThreadMessages(client, channel, threadTs);
   const chatInput = threadToModelInput(threadMessages, botUserId);
 
-  const resp = await openai.responses.create({
+  const vectorResp = await openai.responses.create({
     model: MODEL,
-    instructions: BOT_INSTRUCTIONS,
+    instructions: VECTOR_ONLY_INSTRUCTIONS,
     input: chatInput,
-    tools: [
-      {
-        type: "file_search",
-        vector_store_ids: [VECTOR_STORE_ID],
-      },
-    ],
+    tools: buildResponseTools({ includeFileSearch: true }),
   });
 
-  return (resp.output_text || "").trim() || "I couldn't generate a response.";
+  const vectorReply = (vectorResp.output_text || "").trim();
+  if (!needsWebSearch(vectorReply)) {
+    return {
+      text: vectorReply || "I couldn't generate a response.",
+      source: "vector_store",
+    };
+  }
+
+  if (WEB_SEARCH_ALLOWED_DOMAINS.length === 0) {
+    return {
+      text: "I couldn't find that in the uploaded docs, and web search is not enabled.",
+      source: "vector_store_no_answer",
+    };
+  }
+
+  logBlock("VECTOR STORE MISS", {
+    action: "Falling back to web search.",
+    web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", "),
+  });
+
+  const webResp = await openai.responses.create({
+    model: MODEL,
+    instructions: WEB_FALLBACK_INSTRUCTIONS,
+    input: chatInput,
+    tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true }),
+  });
+
+  return {
+    text: (webResp.output_text || "").trim() || "I couldn't generate a response.",
+    source: "web_search",
+  };
 }
 
 async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
   const text = latestMessage.text || "";
 
   if (isBotMentioned(text, botUserId)) {
-    console.log("Thread follow-up: replying because the bot was mentioned.");
-    return true;
+    return {
+      shouldReply: true,
+      decision: "YES",
+      reason: "The bot was mentioned in the follow-up.",
+    };
   }
   if (isObviousChatter(text)) {
-    console.log("Thread follow-up: skipping obvious chatter.");
-    return false;
+    return {
+      shouldReply: false,
+      decision: "NO",
+      reason: "Obvious acknowledgement/chatter.",
+    };
   }
 
   const recentThread = threadToModelInput(messages, botUserId)
@@ -178,15 +319,19 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
       "Decide whether the assistant should reply to the latest Slack thread message. " +
       "Reply YES only when the latest human message is directed at the assistant, asks for clarification of the assistant's prior answer, or clearly continues the bot-help request. " +
       "Reply NO for thanks, acknowledgements, side chatter, or human-to-human discussion. " +
-      "Return only YES or NO.",
+      "Return YES or NO, followed by a short reason.",
     input:
       `Thread transcript:\n${recentThread}\n\n` +
       `Latest message:\n${cleanSlackText(text)}`,
   });
 
-  const decision = (resp.output_text || "").trim().toUpperCase();
-  console.log(`Thread follow-up classifier decision: ${decision || "(empty)"}`);
-  return decision.startsWith("YES");
+  const rawDecision = (resp.output_text || "").trim();
+  const decision = rawDecision.toUpperCase().startsWith("YES") ? "YES" : "NO";
+  return {
+    shouldReply: decision === "YES",
+    decision,
+    reason: rawDecision || "(empty classifier response)",
+  };
 }
 
 async function replyWithError(say, threadTs) {
@@ -198,25 +343,63 @@ async function replyWithError(say, threadTs) {
 
 slackApp.event("app_mention", async ({ event, client, say, context }) => {
   const threadTs = event.thread_ts || event.ts;
+  const labels = await getSlackContextLabels(client, event.channel, event.user);
 
   try {
+    logBlock("APP MENTION RECEIVED", {
+      user: labels.user,
+      channel: labels.channel,
+      thread_ts: threadTs,
+      message_ts: event.ts,
+      text: formatTextForLog(event.text),
+    });
+
     // 1) Restrict to #tech-help (but reply elsewhere with a nudge)
     if (!isChannelAllowed(event.channel)) {
+      const nudge = pickRandom(SNARKY_REPLIES);
+      logBlock("APP MENTION BLOCKED", {
+        user: labels.user,
+        channel: labels.channel,
+        reason: "Channel is not in SLACK_ALLOWED_CHANNEL_IDS.",
+        response: nudge,
+      });
+
       await say({
         thread_ts: threadTs,
-        text: pickRandom(SNARKY_REPLIES),
+        text: nudge,
       });
       return;
     }
 
+    logBlock("GENERATING BOT REPLY", {
+      trigger: "app_mention",
+      model: MODEL,
+      first_pass_tools: buildResponseTools({ includeFileSearch: true })
+        .map((tool) => tool.type)
+        .join(", "),
+      fallback_tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
+        .map((tool) => tool.type)
+        .join(", ") || "(disabled)",
+      web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+    });
+
     const reply = await generateReply(client, event.channel, threadTs, context.botUserId);
+
+    logBlock("BOT REPLY SENT", {
+      trigger: "app_mention",
+      user: labels.user,
+      channel: labels.channel,
+      thread_ts: threadTs,
+      answer_source: reply.source,
+      response: reply.text,
+    });
 
     await say({
       thread_ts: threadTs,
-      text: reply,
+      text: reply.text,
     });
   } catch (err) {
-    console.error(err);
+    logLine("ERROR handling app_mention:", err.stack || err.message || String(err));
     await replyWithError(say, threadTs);
   }
 });
@@ -229,39 +412,83 @@ slackApp.message(async ({ message, client, say, context }) => {
     if (message.subtype || message.bot_id || message.user === context.botUserId) return;
     if (!isChannelAllowed(message.channel)) return;
 
-    console.log(
-      `Thread follow-up received: channel=${message.channel} thread_ts=${threadTs} user=${message.user}`
-    );
+    const labels = await getSlackContextLabels(client, message.channel, message.user);
+
+    logBlock("THREAD FOLLOW-UP RECEIVED", {
+      user: labels.user,
+      channel: labels.channel,
+      thread_ts: threadTs,
+      message_ts: message.ts,
+      text: formatTextForLog(message.text),
+    });
 
     const threadMessages = await fetchThreadMessages(client, message.channel, threadTs);
     if (!threadHasBotReply(threadMessages, context.botUserId)) {
-      console.log("Thread follow-up: skipping because bot has not replied in this thread.");
+      logBlock("THREAD FOLLOW-UP SKIPPED", {
+        user: labels.user,
+        channel: labels.channel,
+        thread_ts: threadTs,
+        reason: "Bot has not replied in this thread.",
+      });
       return;
     }
 
-    const shouldReply = await shouldReplyToThreadMessage(
+    const replyDecision = await shouldReplyToThreadMessage(
       threadMessages,
       context.botUserId,
       message
     );
-    if (!shouldReply) {
-      console.log("Thread follow-up: classifier chose not to reply.");
+
+    logBlock("THREAD FOLLOW-UP DECISION", {
+      decision: replyDecision.decision,
+      reason: replyDecision.reason,
+      thread_messages_seen: threadMessages.length,
+    });
+
+    if (!replyDecision.shouldReply) {
       return;
     }
 
+    logBlock("GENERATING BOT REPLY", {
+      trigger: "thread_follow_up",
+      model: MODEL,
+      first_pass_tools: buildResponseTools({ includeFileSearch: true })
+        .map((tool) => tool.type)
+        .join(", "),
+      fallback_tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
+        .map((tool) => tool.type)
+        .join(", ") || "(disabled)",
+      web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+    });
+
     const reply = await generateReply(client, message.channel, threadTs, context.botUserId);
+
+    logBlock("BOT REPLY SENT", {
+      trigger: "thread_follow_up",
+      user: labels.user,
+      channel: labels.channel,
+      thread_ts: threadTs,
+      answer_source: reply.source,
+      response: reply.text,
+    });
 
     await say({
       thread_ts: threadTs,
-      text: reply,
+      text: reply.text,
     });
   } catch (err) {
-    console.error(err);
+    logLine("ERROR handling message:", err.stack || err.message || String(err));
     if (threadTs) await replyWithError(say, threadTs);
   }
 });
 
 (async () => {
   await slackApp.start();
-  console.log("⚡️ Slack bot running (Socket Mode).");
+  logBlock("SLACK BOT RUNNING", {
+    mode: "Socket Mode",
+    model: MODEL,
+    allowed_channels: ALLOWED_CHANNEL_IDS.join(", ") || "(any channel the bot can access)",
+    vector_store_id: VECTOR_STORE_ID,
+    web_search_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+  });
 })();

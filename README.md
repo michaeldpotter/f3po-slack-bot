@@ -29,11 +29,14 @@ SLACK_ALLOWED_CHANNEL_IDS=C1234567890,G1234567890
 OPENAI_API_KEY=sk...
 OPENAI_MODEL=gpt-5-mini
 VECTOR_STORE_ID=vs_...
+WEB_SEARCH_ALLOWED_DOMAINS=f3nation.com
 ```
 
 `SLACK_ALLOWED_CHANNEL_IDS` is optional. Leave it blank to let the bot answer in any channel it has access to. Set one or more comma-separated channel IDs to limit where the bot answers. Public channel IDs usually start with `C`; private channel IDs usually start with `G`.
 
 The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `SLACK_ALLOWED_CHANNEL_IDS` is preferred.
+
+`WEB_SEARCH_ALLOWED_DOMAINS` is optional. Set it to one or more comma-separated bare domains, such as `f3nation.com`, to let the bot use OpenAI web search on those sites in addition to the vector store. Leave it blank to disable web search. Do not include `https://`.
 
 ## Slack App Setup
 
@@ -41,7 +44,7 @@ The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `S
 2. Add a bot user.
 3. Enable Socket Mode.
 4. Create an app-level token with the `connections:write` scope and put it in `SLACK_APP_TOKEN`.
-5. Add bot scopes such as `app_mentions:read`, `chat:write`, `channels:history`, `channels:read`, and `groups:history`.
+5. Add bot scopes such as `app_mentions:read`, `chat:write`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, and `users:read`.
 6. Subscribe the bot to events: `app_mention`, `message.channels`, and `message.groups`.
 7. Install the app into the workspace.
 8. Invite the bot to each channel where it should answer.
@@ -91,9 +94,11 @@ Mention the bot in Slack from an allowed channel:
 @bot What are the AO naming rules?
 ```
 
-The bot reads the current Slack thread, searches the vector store, and replies in-thread. If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies with a short nudge to use an allowed channel.
+The bot reads the current Slack thread, searches the vector store first, and replies in-thread. If the thread plus vector store do not contain enough information, it falls back to OpenAI web search over `WEB_SEARCH_ALLOWED_DOMAINS`. If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies with a short nudge to use an allowed channel.
 
 After the bot has replied in a thread, it can also answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event. It first checks whether the bot already participated, skips obvious acknowledgements like "thanks" or "got it", and uses OpenAI to decide whether ambiguous follow-ups are really directed at the bot.
+
+While the bot is running, the terminal logs each bot interaction: who asked, which channel/thread it came from, the incoming text, follow-up reply decisions, whether the answer came from the vector store or web fallback, the model/tools used, and the response sent. If `users:read` or `groups:read` are missing, the bot still works but logs Slack IDs instead of friendly names.
 
 ## Verify
 
