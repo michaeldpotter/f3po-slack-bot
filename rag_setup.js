@@ -1,8 +1,8 @@
 // rag_setup.js
 //
 // Usage:
-//   node rag_setup.js rebuild [docsDir]
-//   node rag_setup.js add [docsDir]
+//   node rag_setup.js rebuild [docsDir] [--force]
+//   node rag_setup.js add [docsDir] [--force]
 //
 // Defaults:
 //   mode: rebuild
@@ -22,10 +22,12 @@ const OpenAI = require("openai");
 
 const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".docx", ".html", ".csv", ".json"]);
 const DEFAULT_DOCS_DIR = process.env.VECTOR_STORE_SOURCE_DIR || "VectorStore";
+const DEFAULT_SOURCE_ROOT = "VectorStore";
 const DEFAULT_ENV_PATH = ".env";
 const VECTOR_STORE_NAME_PREFIX = "F3PO Knowledge Docs";
 const VECTOR_STORE_RESTART_SERVICE =
   process.env.VECTOR_STORE_RESTART_SERVICE ?? "f3po-slack-bot.service";
+const SERVICE_NAME_PATTERN = /^[A-Za-z0-9_.@:-]+\.service$/;
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -40,24 +42,28 @@ const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 function printUsage() {
   console.log(`
 Usage:
-  node rag_setup.js rebuild [docsDir]
-  node rag_setup.js add [docsDir]
+  node rag_setup.js rebuild [docsDir] [--force]
+  node rag_setup.js add [docsDir] [--force]
 
 Examples:
   node rag_setup.js rebuild
   node rag_setup.js rebuild ./VectorStore
   node rag_setup.js add ./VectorStore
+  node rag_setup.js rebuild ~/Documents/f3-docs --force
 
 Notes:
   - rebuild creates a new vector store and writes its ID to .env.
   - add uses the current VECTOR_STORE_ID and uploads only new or changed files.
   - docsDir defaults to VECTOR_STORE_SOURCE_DIR or ./VectorStore.
+  - docsDir must be inside ./VectorStore unless --force is passed.
 `);
 }
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const first = args[0];
+  const force = args.includes("--force");
+  const positional = args.filter((arg) => arg !== "--force");
+  const first = positional[0];
 
   if (first === "--help" || first === "-h") {
     return { help: true };
@@ -66,7 +72,8 @@ function parseArgs(argv) {
   if (first === "rebuild" || first === "add") {
     return {
       mode: first,
-      docsDir: args[1] || DEFAULT_DOCS_DIR,
+      docsDir: positional[1] || DEFAULT_DOCS_DIR,
+      force,
     };
   }
 
@@ -74,7 +81,27 @@ function parseArgs(argv) {
   return {
     mode: "rebuild",
     docsDir: first || DEFAULT_DOCS_DIR,
+    force,
   };
+}
+
+function assertDocsDirAllowed(docsDir, force = false) {
+  if (force) {
+    console.log("Path guard bypassed with --force. Be careful: files will be uploaded to OpenAI.");
+    return;
+  }
+
+  const sourceRoot = path.resolve(DEFAULT_SOURCE_ROOT);
+  const requested = path.resolve(docsDir);
+  const relative = path.relative(sourceRoot, requested);
+  const isInsideSourceRoot = relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+
+  if (!isInsideSourceRoot) {
+    throw new Error(
+      `Refusing to ingest outside ${DEFAULT_SOURCE_ROOT}: ${docsDir}\n` +
+        "Move files under VectorStore or rerun with --force if you really intend to upload that path."
+    );
+  }
 }
 
 function walkDir(dir) {
@@ -265,6 +292,17 @@ function isRestartDisabled(serviceName) {
   return normalized === "" || normalized === "0" || normalized === "false" || normalized === "none";
 }
 
+function validateRestartServiceName(serviceName) {
+  if (isRestartDisabled(serviceName)) return;
+
+  if (!SERVICE_NAME_PATTERN.test(serviceName)) {
+    throw new Error(
+      `Invalid VECTOR_STORE_RESTART_SERVICE: ${serviceName}\n` +
+        "Use a simple systemd service name like f3po-slack-bot.service, or set it to none."
+    );
+  }
+}
+
 function canUseSystemctl() {
   if (process.platform !== "linux") return false;
 
@@ -294,6 +332,7 @@ function restartServiceAfterRebuild() {
     console.log("Service restart after rebuild is disabled.");
     return;
   }
+  validateRestartServiceName(serviceName);
 
   if (!canUseSystemctl()) {
     console.log("Skipping service restart; systemd is not available on this machine.");
@@ -383,12 +422,15 @@ async function add(files) {
 }
 
 async function main() {
-  const { help, mode, docsDir } = parseArgs(process.argv);
+  const { help, mode, docsDir, force } = parseArgs(process.argv);
 
   if (help) {
     printUsage();
     return;
   }
+
+  validateRestartServiceName(VECTOR_STORE_RESTART_SERVICE);
+  assertDocsDirAllowed(docsDir, force);
 
   const files = getSourceFiles(docsDir);
   console.log(`Mode: ${mode}`);

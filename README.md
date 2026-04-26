@@ -109,9 +109,9 @@ The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `S
 
 `WEB_SEARCH_ALLOWED_DOMAINS` is optional. Set it to one or more comma-separated bare domains, such as `f3nation.com`, to let the bot use OpenAI web search on those sites in addition to the vector store. Leave it blank to disable web search. Do not include `https://`.
 
-`VECTOR_STORE_SOURCE_DIR` is optional and defaults to `VectorStore`. It is the folder `rag_setup.js` reads when rebuilding or updating the OpenAI vector store without an explicit folder argument.
+`VECTOR_STORE_SOURCE_DIR` is optional and defaults to `VectorStore`. It is the folder `rag_setup.js` reads when rebuilding or updating the OpenAI vector store without an explicit folder argument. For safety, `rag_setup.js` refuses to ingest folders outside `VectorStore` unless you pass `--force`.
 
-`VECTOR_STORE_RESTART_SERVICE` is optional and defaults to `f3po-slack-bot.service`. After `rag:rebuild` updates `.env`, the script restarts this systemd service on Linux so the bot picks up the new `VECTOR_STORE_ID`. Set it to `none` to disable automatic restart.
+`VECTOR_STORE_RESTART_SERVICE` is optional and defaults to `f3po-slack-bot.service`. After `rag:rebuild` updates `.env`, the script restarts this systemd service on Linux so the bot picks up the new `VECTOR_STORE_ID`. The value must be a simple systemd unit name ending in `.service`. Set it to `none` to disable automatic restart.
 
 `LOG_DIR` and `LOG_RETENTION_DAYS` are optional. By default, the bot writes daily log files to `logs/f3po-YYYY-MM-DD.log` and keeps seven days of logs. Old daily logs are cleaned up on startup and once per day while the bot runs.
 
@@ -219,6 +219,12 @@ Or rebuild only from one document folder:
 npm run rag:rebuild -- "./VectorStore/F3 Nation Documents"
 ```
 
+Ingest paths are intentionally guarded. By default, `rag_setup.js` only accepts folders inside `VectorStore` so an accidental command like `npm run rag:rebuild -- ~/Documents` does not upload unintended files to OpenAI. If you truly need to ingest an outside folder, pass `--force`:
+
+```sh
+npm run rag:rebuild -- ~/Documents/f3-docs --force
+```
+
 After rebuild, the script restarts `f3po-slack-bot.service` automatically on RHEL so the running process reads the updated `VECTOR_STORE_ID` from `.env`.
 
 If automatic restart is disabled or systemd is not available, restart the bot manually:
@@ -269,6 +275,7 @@ The script also supports direct usage:
 node rag_setup.js --help
 node rag_setup.js rebuild ./VectorStore
 node rag_setup.js add ./VectorStore
+node rag_setup.js rebuild ~/Documents/f3-docs --force
 ```
 
 Recommended first test:
