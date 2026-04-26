@@ -96,6 +96,7 @@ OPENAI_API_KEY=sk...
 OPENAI_MODEL=gpt-5-mini
 VECTOR_STORE_ID=vs_...
 VECTOR_STORE_SOURCE_DIR=VectorStore
+VECTOR_STORE_RESTART_SERVICE=f3po-slack-bot.service
 WEB_SEARCH_ALLOWED_DOMAINS=f3nation.com
 LOG_DIR=logs
 LOG_RETENTION_DAYS=7
@@ -109,6 +110,8 @@ The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `S
 `WEB_SEARCH_ALLOWED_DOMAINS` is optional. Set it to one or more comma-separated bare domains, such as `f3nation.com`, to let the bot use OpenAI web search on those sites in addition to the vector store. Leave it blank to disable web search. Do not include `https://`.
 
 `VECTOR_STORE_SOURCE_DIR` is optional and defaults to `VectorStore`. It is the folder `rag_setup.js` reads when rebuilding or updating the OpenAI vector store without an explicit folder argument.
+
+`VECTOR_STORE_RESTART_SERVICE` is optional and defaults to `f3po-slack-bot.service`. After `rag:rebuild` updates `.env`, the script restarts this systemd service on Linux so the bot picks up the new `VECTOR_STORE_ID`. Set it to `none` to disable automatic restart.
 
 `LOG_DIR` and `LOG_RETENTION_DAYS` are optional. By default, the bot writes daily log files to `logs/f3po-YYYY-MM-DD.log` and keeps seven days of logs. Old daily logs are cleaned up on startup and once per day while the bot runs.
 
@@ -197,7 +200,8 @@ The script:
 4. Adds the uploaded files to that vector store.
 5. Waits for indexing to finish.
 6. Updates `VECTOR_STORE_ID` in `.env`.
-7. Prints the new `VECTOR_STORE_ID`.
+7. Restarts `VECTOR_STORE_RESTART_SERVICE` on Linux when systemd is available.
+8. Prints the new `VECTOR_STORE_ID`.
 
 ```sh
 VECTOR_STORE_ID=vs_abc123
@@ -215,13 +219,9 @@ Or rebuild only from one document folder:
 npm run rag:rebuild -- "./VectorStore/F3 Nation Documents"
 ```
 
-After rebuild, restart the bot so the running process reads the updated `VECTOR_STORE_ID` from `.env`.
+After rebuild, the script restarts `f3po-slack-bot.service` automatically on RHEL so the running process reads the updated `VECTOR_STORE_ID` from `.env`.
 
-```sh
-npm start
-```
-
-For the RHEL service:
+If automatic restart is disabled or systemd is not available, restart the bot manually:
 
 ```sh
 sudo systemctl restart f3po-slack-bot.service
@@ -260,7 +260,7 @@ Use `rag:rebuild` when you want to replace the whole searchable index:
 Large doc cleanup or fresh setup
   -> npm run rag:rebuild
   -> .env gets a new VECTOR_STORE_ID
-  -> restart the bot
+  -> systemd service restarts automatically on RHEL
 ```
 
 The script also supports direct usage:

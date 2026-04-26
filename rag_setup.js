@@ -15,6 +15,7 @@
 require("dotenv").config();
 
 const crypto = require("crypto");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
@@ -23,6 +24,8 @@ const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".docx", ".html", "
 const DEFAULT_DOCS_DIR = process.env.VECTOR_STORE_SOURCE_DIR || "VectorStore";
 const DEFAULT_ENV_PATH = ".env";
 const VECTOR_STORE_NAME_PREFIX = "F3PO Knowledge Docs";
+const VECTOR_STORE_RESTART_SERVICE =
+  process.env.VECTOR_STORE_RESTART_SERVICE ?? "f3po-slack-bot.service";
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -257,6 +260,58 @@ function updateEnvFile(vectorStoreId, envPath = DEFAULT_ENV_PATH) {
   console.log(`Updated ${path.relative(process.cwd(), resolvedEnvPath) || envPath} with VECTOR_STORE_ID.`);
 }
 
+function isRestartDisabled(serviceName) {
+  const normalized = String(serviceName || "").trim().toLowerCase();
+  return normalized === "" || normalized === "0" || normalized === "false" || normalized === "none";
+}
+
+function canUseSystemctl() {
+  if (process.platform !== "linux") return false;
+
+  try {
+    execFileSync("systemctl", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function systemdServiceExists(serviceName) {
+  try {
+    const output = execFileSync("systemctl", ["list-unit-files", serviceName, "--no-legend"], {
+      encoding: "utf8",
+    });
+    return output.includes(serviceName);
+  } catch {
+    return false;
+  }
+}
+
+function restartServiceAfterRebuild() {
+  const serviceName = VECTOR_STORE_RESTART_SERVICE;
+
+  if (isRestartDisabled(serviceName)) {
+    console.log("Service restart after rebuild is disabled.");
+    return;
+  }
+
+  if (!canUseSystemctl()) {
+    console.log("Skipping service restart; systemd is not available on this machine.");
+    return;
+  }
+
+  if (!systemdServiceExists(serviceName)) {
+    console.log(`Skipping service restart; ${serviceName} was not found by systemd.`);
+    return;
+  }
+
+  console.log(`Restarting ${serviceName} to load the new VECTOR_STORE_ID...`);
+  execFileSync("sudo", ["systemctl", "restart", serviceName], { stdio: "inherit" });
+
+  const status = execFileSync("systemctl", ["is-active", serviceName], { encoding: "utf8" }).trim();
+  console.log(`${serviceName} is ${status}.`);
+}
+
 async function rebuild(files) {
   console.log("Creating vector store...");
   const vs = await openai.vectorStores.create({
@@ -268,6 +323,7 @@ async function rebuild(files) {
   const uploaded = await uploadFiles(files);
   await attachFiles(vs.id, uploaded);
   updateEnvFile(vs.id);
+  restartServiceAfterRebuild();
 
   console.log("\nVector store rebuilt and ready.");
   console.log(`VECTOR_STORE_ID=${vs.id}`);
