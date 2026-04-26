@@ -8,7 +8,8 @@
     "rag:setup": "node rag_setup.js",
     "rag:rebuild": "node rag_setup.js rebuild",
     "rag:add": "node rag_setup.js add",
-    "test": "node --check app.js && node --check rag_setup.js"
+    "youtube:export": "node youtube_export.js",
+    "test": "node --check app.js && node --check rag_setup.js && node --check youtube_export.js"
   },
   "keywords": [],
   "author": "",
