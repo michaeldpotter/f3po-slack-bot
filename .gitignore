@@ -2,4 +2,7 @@ node_modules/
 .env
 .DS_Store
 npm-debug.log*
-logs/
+logs/*
+!logs/.gitkeep
+VectorStore/.DS_Store
+VectorStore/F3 Wichita Documents/

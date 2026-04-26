@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node app.js",
     "rag:setup": "node rag_setup.js",
+    "rag:rebuild": "node rag_setup.js rebuild",
+    "rag:add": "node rag_setup.js add",
     "test": "node --check app.js && node --check rag_setup.js"
   },
   "keywords": [],
