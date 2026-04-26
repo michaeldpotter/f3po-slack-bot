@@ -1,10 +1,12 @@
 {
   "name": "slack-context-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Slack Socket Mode bot with OpenAI Responses API and vector store file search.",
+  "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js",
+    "rag:setup": "node rag_setup.js",
+    "test": "node --check app.js && node --check rag_setup.js"
   },
   "keywords": [],
   "author": "",

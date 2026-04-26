@@ -3,15 +3,24 @@ require("dotenv").config();
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
 
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
 const slackApp = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  appToken: process.env.SLACK_APP_TOKEN,
+  token: requireEnv("SLACK_BOT_TOKEN"),
+  appToken: requireEnv("SLACK_APP_TOKEN"),
   socketMode: true,
 });
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 
 const ALLOWED_CHANNEL_ID = process.env.SLACK_ALLOWED_CHANNEL_ID;
+const VECTOR_STORE_ID = requireEnv("VECTOR_STORE_ID");
 
 // Basic safety: keep thread context bounded
 const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
@@ -112,7 +121,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       tools: [
         {
           type: "file_search",
-          vector_store_ids: [process.env.VECTOR_STORE_ID],
+          vector_store_ids: [VECTOR_STORE_ID],
         },
       ],
     });

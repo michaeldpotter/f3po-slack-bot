@@ -18,7 +18,17 @@ const fs = require("fs");
 const path = require("path");
 const OpenAI = require("openai");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".docx", ".html", ".csv", ".json"]);
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 
 function walkDir(dir) {
   const results = [];
@@ -60,13 +70,19 @@ async function main() {
     process.exit(1);
   }
 
-  const allFiles = walkDir(docsDir).filter((f) => f.toLowerCase().endsWith(".md"));
+  const allFiles = walkDir(docsDir).filter((f) =>
+    SUPPORTED_EXTENSIONS.has(path.extname(f).toLowerCase())
+  );
   if (allFiles.length === 0) {
-    console.error("No .md files found under:", docsDir);
+    console.error(
+      `No supported files found under: ${docsDir}\nSupported extensions: ${[
+        ...SUPPORTED_EXTENSIONS,
+      ].join(", ")}`
+    );
     process.exit(1);
   }
 
-  console.log(`Found ${allFiles.length} markdown files. Uploading...`);
+  console.log(`Found ${allFiles.length} supported files. Uploading...`);
 
   const uploadedFileIds = [];
   for (const filePath of allFiles) {
