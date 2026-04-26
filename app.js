@@ -165,19 +165,31 @@ function formatTextForLog(text = "") {
 }
 
 async function getSlackUserLabel(client, userId) {
-  if (!userId) return "unknown";
+  const userContext = await getSlackUserContext(client, userId);
+  return userContext.label;
+}
+
+async function getSlackUserContext(client, userId) {
+  if (!userId) {
+    return { id: "unknown", name: "unknown", label: "unknown" };
+  }
   if (slackUserCache.has(userId)) return slackUserCache.get(userId);
 
   try {
     const res = await client.users.info({ user: userId });
     const user = res.user || {};
-    const label = user.profile?.display_name || user.profile?.real_name || user.name || userId;
-    const value = `${label} (${userId})`;
+    const name = user.profile?.display_name || user.profile?.real_name || user.name || userId;
+    const value = {
+      id: userId,
+      name,
+      label: `${name} (${userId})`,
+    };
     slackUserCache.set(userId, value);
     return value;
   } catch (err) {
-    slackUserCache.set(userId, userId);
-    return userId;
+    const value = { id: userId, name: userId, label: userId };
+    slackUserCache.set(userId, value);
+    return value;
   }
 }
 
@@ -200,12 +212,12 @@ async function getSlackChannelLabel(client, channelId) {
 }
 
 async function getSlackContextLabels(client, channelId, userId) {
-  const [channel, user] = await Promise.all([
+  const [channel, userContext] = await Promise.all([
     getSlackChannelLabel(client, channelId),
-    getSlackUserLabel(client, userId),
+    getSlackUserContext(client, userId),
   ]);
 
-  return { channel, user };
+  return { channel, user: userContext.label, userName: userContext.name, userId: userContext.id };
 }
 
 function cleanupOldLogs() {
@@ -271,7 +283,7 @@ async function fetchThreadMessages(client, channel, threadTs) {
   return messages.slice(Math.max(0, messages.length - MAX_THREAD_MESSAGES));
 }
 
-function threadToModelInput(messages, botUserId) {
+function threadToModelInput(messages, botUserId, respondingToName) {
   // Convert Slack thread into a simple chat-like transcript
   const threadInput = messages.map((m) => {
     const isBot = botUserId && m.user === botUserId;
@@ -290,7 +302,11 @@ function threadToModelInput(messages, botUserId) {
   return [
     {
       role: "system",
-      content: BOT_INSTRUCTIONS,
+      content:
+        BOT_INSTRUCTIONS +
+        (shouldUseNameInReply(respondingToName)
+          ? ` You are responding to ${respondingToName}. Use their name naturally when it helps, but do not force it into every reply.`
+          : ""),
     },
     ...threadInput,
   ];
@@ -328,9 +344,13 @@ function threadHasBotReply(messages, botUserId) {
   return messages.some((m) => botUserId && m.user === botUserId);
 }
 
-async function generateReply(client, channel, threadTs, botUserId) {
+function shouldUseNameInReply(name) {
+  return Boolean(name && name !== "unknown" && !/^U[A-Z0-9]+$/.test(name));
+}
+
+async function generateReply(client, channel, threadTs, botUserId, respondingToName) {
   const threadMessages = await fetchThreadMessages(client, channel, threadTs);
-  const chatInput = threadToModelInput(threadMessages, botUserId);
+  const chatInput = threadToModelInput(threadMessages, botUserId, respondingToName);
 
   const vectorResp = await openai.responses.create({
     model: MODEL,
@@ -435,6 +455,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       "APP MENTION RECEIVED",
       {
         user: labels.user,
+        responding_to: labels.userName,
         channel: labels.channel,
         thread_ts: threadTs,
         message_ts: event.ts,
@@ -469,6 +490,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       {
         trigger: "app_mention",
         model: MODEL,
+        responding_to: labels.userName,
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -481,13 +503,20 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       "debug"
     );
 
-    const reply = await generateReply(client, event.channel, threadTs, context.botUserId);
+    const reply = await generateReply(
+      client,
+      event.channel,
+      threadTs,
+      context.botUserId,
+      labels.userName
+    );
 
     logBlock(
       "BOT REPLY SENT",
       {
         trigger: "app_mention",
         user: labels.user,
+        responding_to: labels.userName,
         channel: labels.channel,
         thread_ts: threadTs,
         answer_source: reply.source,
@@ -521,6 +550,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       "THREAD FOLLOW-UP RECEIVED",
       {
         user: labels.user,
+        responding_to: labels.userName,
         channel: labels.channel,
         thread_ts: threadTs,
         message_ts: message.ts,
@@ -569,6 +599,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       {
         trigger: "thread_follow_up",
         model: MODEL,
+        responding_to: labels.userName,
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -581,13 +612,20 @@ slackApp.message(async ({ message, client, say, context }) => {
       "debug"
     );
 
-    const reply = await generateReply(client, message.channel, threadTs, context.botUserId);
+    const reply = await generateReply(
+      client,
+      message.channel,
+      threadTs,
+      context.botUserId,
+      labels.userName
+    );
 
     logBlock(
       "BOT REPLY SENT",
       {
         trigger: "thread_follow_up",
         user: labels.user,
+        responding_to: labels.userName,
         channel: labels.channel,
         thread_ts: threadTs,
         answer_source: reply.source,
