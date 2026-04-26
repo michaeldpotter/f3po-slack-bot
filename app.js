@@ -512,6 +512,7 @@ slackApp.message(async ({ message, client, say, context }) => {
   try {
     if (!threadTs || message.ts === threadTs) return;
     if (message.subtype || message.bot_id || message.user === context.botUserId) return;
+    if (isBotMentioned(message.text, context.botUserId)) return;
     if (!isChannelAllowed(message.channel)) return;
 
     const labels = await getSlackContextLabels(client, message.channel, message.user);
