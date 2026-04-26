@@ -25,13 +25,15 @@ Fill in `.env`:
 ```sh
 SLACK_BOT_TOKEN=xoxb...
 SLACK_APP_TOKEN=xapp...
-SLACK_ALLOWED_CHANNEL_ID=C1234567890
+SLACK_ALLOWED_CHANNEL_IDS=C1234567890,G1234567890
 OPENAI_API_KEY=sk...
 OPENAI_MODEL=gpt-5-mini
 VECTOR_STORE_ID=vs_...
 ```
 
-`SLACK_ALLOWED_CHANNEL_ID` is optional. If set, the bot only answers in that channel and nudges users elsewhere to use the configured channel.
+`SLACK_ALLOWED_CHANNEL_IDS` is optional. Leave it blank to let the bot answer in any channel it has access to. Set one or more comma-separated channel IDs to limit where the bot answers. Public channel IDs usually start with `C`; private channel IDs usually start with `G`.
+
+The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `SLACK_ALLOWED_CHANNEL_IDS` is preferred.
 
 ## Slack App Setup
 
@@ -39,9 +41,10 @@ VECTOR_STORE_ID=vs_...
 2. Add a bot user.
 3. Enable Socket Mode.
 4. Create an app-level token with the `connections:write` scope and put it in `SLACK_APP_TOKEN`.
-5. Add bot scopes such as `app_mentions:read`, `chat:write`, `channels:history`, and `channels:read`.
-6. Install the app into the workspace.
-7. Invite the bot to the channel where it should answer.
+5. Add bot scopes such as `app_mentions:read`, `chat:write`, `channels:history`, `channels:read`, and `groups:history`.
+6. Subscribe the bot to events: `app_mention`, `message.channels`, and `message.groups`.
+7. Install the app into the workspace.
+8. Invite the bot to each channel where it should answer.
 
 ## Upload Docs
 
@@ -82,13 +85,15 @@ The local folder is your source of truth. The vector store is a disposable searc
 npm start
 ```
 
-Mention the bot in Slack from the allowed channel:
+Mention the bot in Slack from an allowed channel:
 
 ```text
 @bot What are the AO naming rules?
 ```
 
-The bot reads the current Slack thread, searches the vector store, and replies in-thread.
+The bot reads the current Slack thread, searches the vector store, and replies in-thread. If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies with a short nudge to use an allowed channel.
+
+After the bot has replied in a thread, it can also answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event. It first checks whether the bot already participated, skips obvious acknowledgements like "thanks" or "got it", and uses OpenAI to decide whether ambiguous follow-ups are really directed at the bot.
 
 ## Verify
 
