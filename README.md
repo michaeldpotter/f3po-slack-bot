@@ -30,6 +30,9 @@ OPENAI_API_KEY=sk...
 OPENAI_MODEL=gpt-5-mini
 VECTOR_STORE_ID=vs_...
 WEB_SEARCH_ALLOWED_DOMAINS=f3nation.com
+LOG_DIR=logs
+LOG_RETENTION_DAYS=7
+LOG_LEVEL=info
 ```
 
 `SLACK_ALLOWED_CHANNEL_IDS` is optional. Leave it blank to let the bot answer in any channel it has access to. Set one or more comma-separated channel IDs to limit where the bot answers. Public channel IDs usually start with `C`; private channel IDs usually start with `G`.
@@ -37,6 +40,10 @@ WEB_SEARCH_ALLOWED_DOMAINS=f3nation.com
 The older single-channel variable `SLACK_ALLOWED_CHANNEL_ID` still works, but `SLACK_ALLOWED_CHANNEL_IDS` is preferred.
 
 `WEB_SEARCH_ALLOWED_DOMAINS` is optional. Set it to one or more comma-separated bare domains, such as `f3nation.com`, to let the bot use OpenAI web search on those sites in addition to the vector store. Leave it blank to disable web search. Do not include `https://`.
+
+`LOG_DIR` and `LOG_RETENTION_DAYS` are optional. By default, the bot writes daily log files to `logs/f3po-YYYY-MM-DD.log` and keeps seven days of logs. Old daily logs are cleaned up on startup and once per day while the bot runs.
+
+`LOG_LEVEL` is optional and defaults to `info`. Use `error` for errors only, `info` for startup/cleanup/errors, or `debug` for full interaction logs including questions, answers, and follow-up decisions.
 
 ## Slack App Setup
 
@@ -98,7 +105,7 @@ The bot reads the current Slack thread, searches the vector store first, and rep
 
 After the bot has replied in a thread, it can also answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event. It first checks whether the bot already participated, skips obvious acknowledgements like "thanks" or "got it", and uses OpenAI to decide whether ambiguous follow-ups are really directed at the bot.
 
-While the bot is running, the terminal logs each bot interaction: who asked, which channel/thread it came from, the incoming text, follow-up reply decisions, whether the answer came from the vector store or web fallback, the model/tools used, and the response sent. If `users:read` or `groups:read` are missing, the bot still works but logs Slack IDs instead of friendly names.
+When `LOG_LEVEL=debug`, the terminal and daily log file record each bot interaction: who asked, which channel/thread it came from, the incoming text, follow-up reply decisions, whether the answer came from the vector store or web fallback, the model/tools used, and the response sent. If `users:read` or `groups:read` are missing, the bot still works but logs Slack IDs instead of friendly names.
 
 ## Verify
 

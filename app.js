@@ -1,5 +1,7 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
 
@@ -27,6 +29,9 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
 const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
   process.env.WEB_SEARCH_ALLOWED_DOMAINS
 );
+const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
+const LOG_RETENTION_DAYS = Number.parseInt(process.env.LOG_RETENTION_DAYS || "7", 10);
+const LOG_LEVEL = normalizeLogLevel(process.env.LOG_LEVEL || "info");
 const slackUserCache = new Map();
 const slackChannelCache = new Map();
 
@@ -43,20 +48,20 @@ const SNARKY_REPLIES = [
 ];
 
 const BOT_INSTRUCTIONS =
-  "You are the designated Q for #tech-help—here to keep PAX off the injury list (and out of the wrong menu). " +
-  "Answer using the Slack thread conversation plus the tools provided for this response pass. " +
+  "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
+  "You are the designated Q for #tech-help, here to keep PAX off the injury list and out of the wrong menu. " +
   "Be concise, practical, and lightly dry-humored. " +
   "Stay on topic. Do not drift to discussing non-F3 topics.";
 
 const VECTOR_ONLY_INSTRUCTIONS =
-  BOT_INSTRUCTIONS +
+  "Use the Slack thread conversation plus the tools provided for this response pass. " +
   "First try to answer using only the Slack thread conversation and the F3 Nation app docs via file search. " +
   "Do not answer from general knowledge in this pass. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
   "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
 
 const WEB_FALLBACK_INSTRUCTIONS =
-  BOT_INSTRUCTIONS +
+  "Use the Slack thread conversation plus the tools provided for this response pass. " +
   "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
   "If the allowed websites do not contain the answer, say so and ask one targeted question.";
 
@@ -73,6 +78,10 @@ function parseCommaSeparatedList(value = "") {
 
 function parseAllowedChannelIds(value = "") {
   return parseCommaSeparatedList(value);
+}
+
+function normalizeLogLevel(value = "") {
+  return ["error", "info", "debug"].includes(value.toLowerCase()) ? value.toLowerCase() : "info";
 }
 
 function isChannelAllowed(channel) {
@@ -109,16 +118,46 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function logLine(label, value = "") {
-  console.log(`[${nowIso()}] ${label}${value ? ` ${value}` : ""}`);
+function todayLogPath() {
+  return path.join(LOG_DIR, `f3po-${new Date().toISOString().slice(0, 10)}.log`);
 }
 
-function logBlock(title, fields = {}) {
-  console.log(`\n[${nowIso()}] ${title}`);
+function writeLogText(text) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.appendFileSync(todayLogPath(), `${text}\n`, "utf8");
+  } catch (err) {
+    console.error(`[${nowIso()}] ERROR writing log file:`, err.message || err);
+  }
+}
+
+function shouldLog(level) {
+  const weights = { error: 0, info: 1, debug: 2 };
+  return weights[level] <= weights[LOG_LEVEL];
+}
+
+function logLine(label, value = "", level = "info") {
+  if (!shouldLog(level)) return;
+
+  const line = `[${nowIso()}] ${label}${value ? ` ${value}` : ""}`;
+  if (level === "error") console.error(line);
+  else console.log(line);
+  writeLogText(line);
+}
+
+function logBlock(title, fields = {}, level = "info") {
+  if (!shouldLog(level)) return;
+
+  const lines = [``, `[${nowIso()}] ${title}`];
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || value === null || value === "") continue;
-    console.log(`  ${key}: ${value}`);
+    lines.push(`  ${key}: ${value}`);
   }
+
+  const text = lines.join("\n");
+  if (level === "error") console.error(text);
+  else console.log(text);
+  writeLogText(text);
 }
 
 function formatTextForLog(text = "") {
@@ -169,6 +208,40 @@ async function getSlackContextLabels(client, channelId, userId) {
   return { channel, user };
 }
 
+function cleanupOldLogs() {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+
+    const retentionDays = Number.isFinite(LOG_RETENTION_DAYS) ? LOG_RETENTION_DAYS : 7;
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    const removed = [];
+
+    for (const entry of fs.readdirSync(LOG_DIR, { withFileTypes: true })) {
+      if (!entry.isFile() || !/^f3po-\d{4}-\d{2}-\d{2}\.log$/.test(entry.name)) continue;
+
+      const fullPath = path.join(LOG_DIR, entry.name);
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(fullPath);
+        removed.push(entry.name);
+      }
+    }
+
+    if (removed.length > 0) {
+      logBlock(
+        "LOG CLEANUP",
+        {
+          removed_files: removed.join(", "),
+          retention_days: retentionDays,
+        },
+        "info"
+      );
+    }
+  } catch (err) {
+    logLine("ERROR cleaning log files:", err.stack || err.message || String(err), "error");
+  }
+}
+
 function cleanSlackText(text = "") {
   // Minimal cleanup; Slack formatting can be expanded later
   return text.replace(/\s+/g, " ").trim();
@@ -200,7 +273,7 @@ async function fetchThreadMessages(client, channel, threadTs) {
 
 function threadToModelInput(messages, botUserId) {
   // Convert Slack thread into a simple chat-like transcript
-  return messages.map((m) => {
+  const threadInput = messages.map((m) => {
     const isBot = botUserId && m.user === botUserId;
     const role = isBot ? "assistant" : "user";
 
@@ -213,6 +286,14 @@ function threadToModelInput(messages, botUserId) {
       content: truncate(text, MAX_CHARS_PER_MESSAGE),
     };
   });
+
+  return [
+    {
+      role: "system",
+      content: BOT_INSTRUCTIONS,
+    },
+    ...threadInput,
+  ];
 }
 
 function isBotMentioned(text = "", botUserId) {
@@ -273,10 +354,14 @@ async function generateReply(client, channel, threadTs, botUserId) {
     };
   }
 
-  logBlock("VECTOR STORE MISS", {
-    action: "Falling back to web search.",
-    web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", "),
-  });
+  logBlock(
+    "VECTOR STORE MISS",
+    {
+      action: "Falling back to web search.",
+      web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", "),
+    },
+    "debug"
+  );
 
   const webResp = await openai.responses.create({
     model: MODEL,
@@ -346,23 +431,31 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
   const labels = await getSlackContextLabels(client, event.channel, event.user);
 
   try {
-    logBlock("APP MENTION RECEIVED", {
-      user: labels.user,
-      channel: labels.channel,
-      thread_ts: threadTs,
-      message_ts: event.ts,
-      text: formatTextForLog(event.text),
-    });
+    logBlock(
+      "APP MENTION RECEIVED",
+      {
+        user: labels.user,
+        channel: labels.channel,
+        thread_ts: threadTs,
+        message_ts: event.ts,
+        text: formatTextForLog(event.text),
+      },
+      "debug"
+    );
 
     // 1) Restrict to #tech-help (but reply elsewhere with a nudge)
     if (!isChannelAllowed(event.channel)) {
       const nudge = pickRandom(SNARKY_REPLIES);
-      logBlock("APP MENTION BLOCKED", {
-        user: labels.user,
-        channel: labels.channel,
-        reason: "Channel is not in SLACK_ALLOWED_CHANNEL_IDS.",
-        response: nudge,
-      });
+      logBlock(
+        "APP MENTION BLOCKED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          reason: "Channel is not in SLACK_ALLOWED_CHANNEL_IDS.",
+          response: nudge,
+        },
+        "debug"
+      );
 
       await say({
         thread_ts: threadTs,
@@ -371,35 +464,44 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       return;
     }
 
-    logBlock("GENERATING BOT REPLY", {
-      trigger: "app_mention",
-      model: MODEL,
-      first_pass_tools: buildResponseTools({ includeFileSearch: true })
-        .map((tool) => tool.type)
-        .join(", "),
-      fallback_tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
-        .map((tool) => tool.type)
-        .join(", ") || "(disabled)",
-      web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
-    });
+    logBlock(
+      "GENERATING BOT REPLY",
+      {
+        trigger: "app_mention",
+        model: MODEL,
+        first_pass_tools: buildResponseTools({ includeFileSearch: true })
+          .map((tool) => tool.type)
+          .join(", "),
+        fallback_tools:
+          buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
+            .map((tool) => tool.type)
+            .join(", ") || "(disabled)",
+        web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+      },
+      "debug"
+    );
 
     const reply = await generateReply(client, event.channel, threadTs, context.botUserId);
 
-    logBlock("BOT REPLY SENT", {
-      trigger: "app_mention",
-      user: labels.user,
-      channel: labels.channel,
-      thread_ts: threadTs,
-      answer_source: reply.source,
-      response: reply.text,
-    });
+    logBlock(
+      "BOT REPLY SENT",
+      {
+        trigger: "app_mention",
+        user: labels.user,
+        channel: labels.channel,
+        thread_ts: threadTs,
+        answer_source: reply.source,
+        response: reply.text,
+      },
+      "debug"
+    );
 
     await say({
       thread_ts: threadTs,
       text: reply.text,
     });
   } catch (err) {
-    logLine("ERROR handling app_mention:", err.stack || err.message || String(err));
+    logLine("ERROR handling app_mention:", err.stack || err.message || String(err), "error");
     await replyWithError(say, threadTs);
   }
 });
@@ -414,22 +516,30 @@ slackApp.message(async ({ message, client, say, context }) => {
 
     const labels = await getSlackContextLabels(client, message.channel, message.user);
 
-    logBlock("THREAD FOLLOW-UP RECEIVED", {
-      user: labels.user,
-      channel: labels.channel,
-      thread_ts: threadTs,
-      message_ts: message.ts,
-      text: formatTextForLog(message.text),
-    });
-
-    const threadMessages = await fetchThreadMessages(client, message.channel, threadTs);
-    if (!threadHasBotReply(threadMessages, context.botUserId)) {
-      logBlock("THREAD FOLLOW-UP SKIPPED", {
+    logBlock(
+      "THREAD FOLLOW-UP RECEIVED",
+      {
         user: labels.user,
         channel: labels.channel,
         thread_ts: threadTs,
-        reason: "Bot has not replied in this thread.",
-      });
+        message_ts: message.ts,
+        text: formatTextForLog(message.text),
+      },
+      "debug"
+    );
+
+    const threadMessages = await fetchThreadMessages(client, message.channel, threadTs);
+    if (!threadHasBotReply(threadMessages, context.botUserId)) {
+      logBlock(
+        "THREAD FOLLOW-UP SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          reason: "Bot has not replied in this thread.",
+        },
+        "debug"
+      );
       return;
     }
 
@@ -439,50 +549,66 @@ slackApp.message(async ({ message, client, say, context }) => {
       message
     );
 
-    logBlock("THREAD FOLLOW-UP DECISION", {
-      decision: replyDecision.decision,
-      reason: replyDecision.reason,
-      thread_messages_seen: threadMessages.length,
-    });
+    logBlock(
+      "THREAD FOLLOW-UP DECISION",
+      {
+        decision: replyDecision.decision,
+        reason: replyDecision.reason,
+        thread_messages_seen: threadMessages.length,
+      },
+      "debug"
+    );
 
     if (!replyDecision.shouldReply) {
       return;
     }
 
-    logBlock("GENERATING BOT REPLY", {
-      trigger: "thread_follow_up",
-      model: MODEL,
-      first_pass_tools: buildResponseTools({ includeFileSearch: true })
-        .map((tool) => tool.type)
-        .join(", "),
-      fallback_tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
-        .map((tool) => tool.type)
-        .join(", ") || "(disabled)",
-      web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
-    });
+    logBlock(
+      "GENERATING BOT REPLY",
+      {
+        trigger: "thread_follow_up",
+        model: MODEL,
+        first_pass_tools: buildResponseTools({ includeFileSearch: true })
+          .map((tool) => tool.type)
+          .join(", "),
+        fallback_tools:
+          buildResponseTools({ includeFileSearch: false, includeWebSearch: true })
+            .map((tool) => tool.type)
+            .join(", ") || "(disabled)",
+        web_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+      },
+      "debug"
+    );
 
     const reply = await generateReply(client, message.channel, threadTs, context.botUserId);
 
-    logBlock("BOT REPLY SENT", {
-      trigger: "thread_follow_up",
-      user: labels.user,
-      channel: labels.channel,
-      thread_ts: threadTs,
-      answer_source: reply.source,
-      response: reply.text,
-    });
+    logBlock(
+      "BOT REPLY SENT",
+      {
+        trigger: "thread_follow_up",
+        user: labels.user,
+        channel: labels.channel,
+        thread_ts: threadTs,
+        answer_source: reply.source,
+        response: reply.text,
+      },
+      "debug"
+    );
 
     await say({
       thread_ts: threadTs,
       text: reply.text,
     });
   } catch (err) {
-    logLine("ERROR handling message:", err.stack || err.message || String(err));
+    logLine("ERROR handling message:", err.stack || err.message || String(err), "error");
     if (threadTs) await replyWithError(say, threadTs);
   }
 });
 
 (async () => {
+  cleanupOldLogs();
+  setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000).unref();
+
   await slackApp.start();
   logBlock("SLACK BOT RUNNING", {
     mode: "Socket Mode",
@@ -490,5 +616,8 @@ slackApp.message(async ({ message, client, say, context }) => {
     allowed_channels: ALLOWED_CHANNEL_IDS.join(", ") || "(any channel the bot can access)",
     vector_store_id: VECTOR_STORE_ID,
     web_search_domains: WEB_SEARCH_ALLOWED_DOMAINS.join(", ") || "(disabled)",
+    log_dir: LOG_DIR,
+    log_retention_days: Number.isFinite(LOG_RETENTION_DAYS) ? LOG_RETENTION_DAYS : 7,
+    log_level: LOG_LEVEL,
   });
 })();
