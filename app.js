@@ -67,12 +67,15 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "For harmless humor requests about Chubbs, answer with a respectful generic line rather than claiming the documents do not mention him. " +
   "Do not include file citations, source markers, annotation tokens, or file-search citation markup in the final answer. " +
   "Do not answer from general knowledge in this pass. " +
+  "Do not ask the user whether you should search approved websites. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
   "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
 
 const WEB_FALLBACK_INSTRUCTIONS =
   "Use the Slack thread conversation plus the tools provided for this response pass. " +
   "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
+  "Use web search proactively; do not ask the user for permission to search and do not ask which approved site to check. " +
+  "If a specific source would be useful, search the allowed domains and use the best available result. " +
   "Do not include source markers, annotation tokens, or citation markup in the final answer. " +
   "If the allowed websites do not contain the answer, say so and ask one targeted question.";
 
