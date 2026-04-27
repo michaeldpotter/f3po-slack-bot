@@ -36,7 +36,7 @@ const LOG_LEVEL = normalizeLogLevel(process.env.LOG_LEVEL || "info");
 const INTERACTION_DB_PATH =
   process.env.INTERACTION_DB_PATH || path.join(__dirname, "export", "google", "f3po-conversations.sqlite");
 const INTERACTION_RETENTION_DAYS = Number.parseInt(
-  process.env.INTERACTION_RETENTION_DAYS || "365",
+  process.env.INTERACTION_RETENTION_DAYS || "90",
   10
 );
 const slackUserCache = new Map();
@@ -907,6 +907,6 @@ slackApp.message(async ({ message, client, say, context }) => {
     interaction_db_path: INTERACTION_DB_PATH,
     interaction_retention_days: Number.isFinite(INTERACTION_RETENTION_DAYS)
       ? INTERACTION_RETENTION_DAYS
-      : 365,
+      : 90,
   });
 })();

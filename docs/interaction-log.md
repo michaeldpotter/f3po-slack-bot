@@ -37,7 +37,7 @@ export/google/f3po-conversations.sqlite
 
 ```sh
 INTERACTION_DB_PATH=export/google/f3po-conversations.sqlite
-INTERACTION_RETENTION_DAYS=365
+INTERACTION_RETENTION_DAYS=90
 ```
 
 The bot prunes old interaction rows on startup and once per day while running.
