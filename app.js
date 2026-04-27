@@ -204,6 +204,7 @@ function openInteractionDb() {
 
   fs.mkdirSync(path.dirname(INTERACTION_DB_PATH), { recursive: true });
   interactionDb = new DatabaseSync(INTERACTION_DB_PATH);
+  fs.chmodSync(INTERACTION_DB_PATH, 0o600);
   interactionDb.exec("PRAGMA journal_mode = WAL;");
   interactionDb.exec("PRAGMA busy_timeout = 5000;");
   return interactionDb;
