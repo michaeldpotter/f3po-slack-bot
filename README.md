@@ -66,6 +66,10 @@ LOG_RETENTION_DAYS=7
 LOG_LEVEL=info
 INTERACTION_DB_PATH=export/google/f3po-conversations.sqlite
 INTERACTION_RETENTION_DAYS=90
+MESSAGE_DEDUPE_TTL_MS=300000
+QUESTION_DEDUPE_TTL_MS=120000
+THREAD_REPLY_LIMIT=4
+THREAD_REPLY_LIMIT_WINDOW_MS=60000
 ```
 
 Key env notes:
@@ -77,6 +81,7 @@ Key env notes:
 - `GOOGLE_CLOUD_PROJECT=f3data` is used by the local reporting sync.
 - `LOG_LEVEL` can be `error`, `info`, or `debug`.
 - `INTERACTION_DB_PATH` stores searchable bot questions/responses in local SQLite.
+- `MESSAGE_DEDUPE_TTL_MS`, `QUESTION_DEDUPE_TTL_MS`, `THREAD_REPLY_LIMIT`, and `THREAD_REPLY_LIMIT_WINDOW_MS` are runtime guardrails that prevent duplicate Slack event handling and runaway thread replies.
 
 `node_modules/`, `.env`, `export/`, daily logs, and private Wichita vectorstore docs are ignored by Git.
 
@@ -174,5 +179,7 @@ If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, i
 F3PO should not invent Slack channel names. If it cannot answer an F3 Wichita tech or IT question, it should use the vector store docs to identify the current Tech Q / IT Q and suggest contacting that person.
 
 After the bot has replied in a thread, it can answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event.
+
+To control cost and avoid reply loops, F3PO ignores bot-authored messages, deduplicates repeated Slack event deliveries by channel/message timestamp, suppresses very similar questions repeated in the same thread for a short cooldown, and caps how many times it will answer in one thread during a rolling window.
 
 The bot also writes answered questions and responses to the local interaction SQLite database so they can be searched later. Interaction rows include detected question tone (`factual`, `playful`, or `sensitive`), a short tone reason, and elapsed response time. When `LOG_LEVEL=debug`, the terminal and daily log file record more detailed retrieval path, tone, timings, and model/tool usage.

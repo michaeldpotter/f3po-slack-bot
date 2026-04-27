@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
+const { performance } = require("node:perf_hooks");
 const { DatabaseSync } = require("node:sqlite");
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
@@ -40,8 +41,18 @@ const INTERACTION_RETENTION_DAYS = Number.parseInt(
   process.env.INTERACTION_RETENTION_DAYS || "90",
   10
 );
+const MESSAGE_DEDUPE_TTL_MS = parsePositiveInt(process.env.MESSAGE_DEDUPE_TTL_MS, 5 * 60 * 1000);
+const QUESTION_DEDUPE_TTL_MS = parsePositiveInt(process.env.QUESTION_DEDUPE_TTL_MS, 2 * 60 * 1000);
+const THREAD_REPLY_LIMIT = parsePositiveInt(process.env.THREAD_REPLY_LIMIT, 4);
+const THREAD_REPLY_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.THREAD_REPLY_LIMIT_WINDOW_MS,
+  60 * 1000
+);
 const slackUserCache = new Map();
 const slackChannelCache = new Map();
+const handledMessageCache = new Map();
+const recentThreadQuestions = new Map();
+const threadReplyWindows = new Map();
 let interactionDb;
 let interactionFtsEnabled = false;
 
@@ -121,6 +132,11 @@ function normalizeLogLevel(value = "") {
   return ["error", "info", "debug"].includes(value.toLowerCase()) ? value.toLowerCase() : "info";
 }
 
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function isChannelAllowed(channel) {
   return ALLOWED_CHANNEL_IDS.length === 0 || ALLOWED_CHANNEL_IDS.includes(channel);
 }
@@ -168,8 +184,117 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function monotonicNowMs() {
+  return performance.now();
+}
+
 function elapsedMsSince(startedAt) {
-  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  if (!Number.isFinite(startedAt)) return 0;
+  return Math.max(0, monotonicNowMs() - startedAt);
+}
+
+function pruneTtlMap(map, ttlMs, now = Date.now()) {
+  for (const [key, timestamp] of map.entries()) {
+    if (now - timestamp > ttlMs) map.delete(key);
+  }
+}
+
+function claimTtlKey(map, key, ttlMs) {
+  const now = Date.now();
+  pruneTtlMap(map, ttlMs, now);
+
+  const lastSeenAt = map.get(key);
+  if (lastSeenAt && now - lastSeenAt <= ttlMs) return false;
+
+  map.set(key, now);
+  return true;
+}
+
+function slackMessageKey(channel, ts) {
+  return `${channel || "unknown"}:${ts || "unknown"}`;
+}
+
+function normalizeQuestionFingerprint(text = "") {
+  return cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .toLowerCase()
+    .replace(/\btageting\b/g, "targeting")
+    .replace(/\btargetting\b/g, "targeting")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a = "", b = "") {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = new Array(b.length + 1);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[b.length];
+}
+
+function isSimilarQuestion(a = "", b = "") {
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  const longerLength = Math.max(a.length, b.length);
+  const distance = levenshteinDistance(a, b);
+  const similarity = 1 - distance / longerLength;
+  return longerLength >= 24 && similarity >= 0.96;
+}
+
+function claimRecentThreadQuestion(channel, threadTs, text) {
+  const normalized = normalizeQuestionFingerprint(text);
+  if (!normalized) return true;
+
+  const now = Date.now();
+  const threadKey = `${channel || "unknown"}:${threadTs || "unknown"}`;
+  const recent = (recentThreadQuestions.get(threadKey) || []).filter(
+    (entry) => now - entry.timestamp <= QUESTION_DEDUPE_TTL_MS
+  );
+
+  if (recent.some((entry) => isSimilarQuestion(entry.normalized, normalized))) {
+    recentThreadQuestions.set(threadKey, recent);
+    return false;
+  }
+
+  recent.push({ normalized, timestamp: now });
+  recentThreadQuestions.set(threadKey, recent);
+  return true;
+}
+
+function claimThreadReplySlot(threadTs) {
+  const now = Date.now();
+  const threadKey = threadTs || "unknown";
+  const recent = (threadReplyWindows.get(threadKey) || []).filter(
+    (timestamp) => now - timestamp <= THREAD_REPLY_LIMIT_WINDOW_MS
+  );
+
+  if (recent.length >= THREAD_REPLY_LIMIT) {
+    threadReplyWindows.set(threadKey, recent);
+    return false;
+  }
+
+  recent.push(now);
+  threadReplyWindows.set(threadKey, recent);
+  return true;
 }
 
 function todayLogPath() {
@@ -452,7 +577,7 @@ async function getSlackChannelLabel(client, channelId) {
 }
 
 async function getSlackContextLabels(client, channelId, userId) {
-  const startedAt = process.hrtime.bigint();
+  const startedAt = monotonicNowMs();
   const [channel, userContext] = await Promise.all([
     getSlackChannelLabel(client, channelId),
     getSlackUserContext(client, userId),
@@ -512,7 +637,7 @@ function truncate(s, max) {
 }
 
 async function fetchThreadMessages(client, channel, threadTs) {
-  const startedAt = process.hrtime.bigint();
+  const startedAt = monotonicNowMs();
   // conversations.replies returns the parent + replies
   const res = await client.conversations.replies({
     channel,
@@ -749,11 +874,11 @@ function shouldUseNameInReply(name) {
 }
 
 async function generateReply(client, channel, threadTs, botUserId, respondingToName) {
-  const totalStartedAt = process.hrtime.bigint();
+  const totalStartedAt = monotonicNowMs();
   const threadMessages = await fetchThreadMessages(client, channel, threadTs);
   const chatInput = threadToModelInput(threadMessages, botUserId, respondingToName);
 
-  const vectorStartedAt = process.hrtime.bigint();
+  const vectorStartedAt = monotonicNowMs();
   const vectorResp = await openai.responses.create({
     model: MODEL,
     instructions: VECTOR_ONLY_INSTRUCTIONS,
@@ -796,7 +921,7 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
     "debug"
   );
 
-  const webStartedAt = process.hrtime.bigint();
+  const webStartedAt = monotonicNowMs();
   const webResp = await openai.responses.create({
     model: MODEL,
     instructions: WEB_FALLBACK_INSTRUCTIONS,
@@ -818,7 +943,7 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
 }
 
 async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
-  const startedAt = process.hrtime.bigint();
+  const startedAt = monotonicNowMs();
   const text = latestMessage.text || "";
 
   if (isBotMentioned(text, botUserId)) {
@@ -849,7 +974,7 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
     }
   }
 
-  const classifierStartedAt = process.hrtime.bigint();
+  const classifierStartedAt = monotonicNowMs();
   const recentThread = threadToModelInput(messages, botUserId)
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
@@ -886,12 +1011,31 @@ async function replyWithError(say, threadTs) {
 }
 
 slackApp.event("app_mention", async ({ event, client, say, context }) => {
-  const requestStartedAt = process.hrtime.bigint();
+  const requestStartedAt = monotonicNowMs();
   const threadTs = event.thread_ts || event.ts;
-  const labels = await getSlackContextLabels(client, event.channel, event.user);
-  const toneResult = classifyMessageTone(event.text);
 
   try {
+    if (event.subtype || event.bot_id || event.user === context.botUserId) return;
+
+    const messageKey = slackMessageKey(event.channel, event.ts);
+    if (!claimTtlKey(handledMessageCache, messageKey, MESSAGE_DEDUPE_TTL_MS)) {
+      logBlock(
+        "APP MENTION SKIPPED",
+        {
+          channel: event.channel,
+          thread_ts: threadTs,
+          message_ts: event.ts,
+          reason: "Duplicate Slack message event already handled.",
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      return;
+    }
+
+    const labels = await getSlackContextLabels(client, event.channel, event.user);
+    const toneResult = classifyMessageTone(event.text);
+
     logBlock(
       "APP MENTION RECEIVED",
       {
@@ -944,6 +1088,76 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: event.text,
         responseText: nudge,
+      });
+      return;
+    }
+
+    if (!claimRecentThreadQuestion(event.channel, threadTs, event.text)) {
+      const skippedReason = "Similar question was answered recently in this thread.";
+      logBlock(
+        "APP MENTION SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          message_ts: event.ts,
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      logInteraction({
+        trigger: "app_mention_skipped",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: "duplicate_question_skipped",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: event.text,
+        responseText: skippedReason,
+      });
+      return;
+    }
+
+    if (!claimThreadReplySlot(threadTs)) {
+      const skippedReason = "Thread reply safety limit reached.";
+      logBlock(
+        "APP MENTION SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          message_ts: event.ts,
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      logInteraction({
+        trigger: "app_mention_skipped",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: "thread_reply_limit",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: event.text,
+        responseText: skippedReason,
       });
       return;
     }
@@ -1110,7 +1324,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
 });
 
 slackApp.message(async ({ message, client, say, context }) => {
-  const requestStartedAt = process.hrtime.bigint();
+  const requestStartedAt = monotonicNowMs();
   const threadTs = message.thread_ts;
 
   try {
@@ -1118,6 +1332,22 @@ slackApp.message(async ({ message, client, say, context }) => {
     if (message.subtype || message.bot_id || message.user === context.botUserId) return;
     if (isBotMentioned(message.text, context.botUserId)) return;
     if (!isChannelAllowed(message.channel)) return;
+
+    const messageKey = slackMessageKey(message.channel, message.ts);
+    if (!claimTtlKey(handledMessageCache, messageKey, MESSAGE_DEDUPE_TTL_MS)) {
+      logBlock(
+        "THREAD FOLLOW-UP SKIPPED",
+        {
+          channel: message.channel,
+          thread_ts: threadTs,
+          message_ts: message.ts,
+          reason: "Duplicate Slack message event already handled.",
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      return;
+    }
 
     const labels = await getSlackContextLabels(client, message.channel, message.user);
     const toneResult = classifyMessageTone(message.text);
@@ -1214,6 +1444,76 @@ slackApp.message(async ({ message, client, say, context }) => {
         elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: message.text,
         responseText: replyDecision.reason || "Thread follow-up was not directed at the bot.",
+      });
+      return;
+    }
+
+    if (!claimRecentThreadQuestion(message.channel, threadTs, message.text)) {
+      const skippedReason = "Similar question was answered recently in this thread.";
+      logBlock(
+        "THREAD FOLLOW-UP SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          message_ts: message.ts,
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      logInteraction({
+        trigger: "thread_follow_up_skipped",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "duplicate_question_skipped",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: message.text,
+        responseText: skippedReason,
+      });
+      return;
+    }
+
+    if (!claimThreadReplySlot(threadTs)) {
+      const skippedReason = "Thread reply safety limit reached.";
+      logBlock(
+        "THREAD FOLLOW-UP SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          message_ts: message.ts,
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      logInteraction({
+        trigger: "thread_follow_up_skipped",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "thread_reply_limit",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: message.text,
+        responseText: skippedReason,
       });
       return;
     }
