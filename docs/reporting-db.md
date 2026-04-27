@@ -54,6 +54,14 @@ npm run reporting:sync -- --days 7
 
 The sync uses `analytics.event_info.updated` and `analytics.attendance_info.updated`. It records the last successful sync in SQLite and subtracts `REPORTING_SYNC_DAYS` as an overlap window, so late updates are picked up.
 
+Wichita is selected with region org ID `36533`:
+
+```sh
+REPORTING_REGION_ORG_ID=36533
+```
+
+The event sync filters `analytics.event_info.region_org_id` directly. The attendance sync joins attendance rows back to `analytics.event_info` and only imports attendance for Wichita events.
+
 Keep the local sync audit log for 90 days by default:
 
 ```sh
