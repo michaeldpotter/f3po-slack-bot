@@ -22,6 +22,21 @@ chmod 600 .env
 
 Edit `.env` with the real Slack/OpenAI values before starting the service.
 
+## BigQuery Access
+
+To let the RHEL server run the BigQuery backblast exporter directly, install and authenticate the Google Cloud CLI:
+
+```sh
+cd /mnt/nas/node/f3po-slack-bot
+./scripts/setup-rhel-gcloud.sh
+```
+
+Then verify:
+
+```sh
+npm run backblasts:bigquery:dry-run
+```
+
 Create `/etc/systemd/system/f3po-slack-bot.service`:
 
 ```ini

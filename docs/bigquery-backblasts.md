@@ -12,6 +12,43 @@ The exporter reads `analytics.event_info`, transforms the `backblast` field into
 - Google Cloud CLI, which provides `gcloud`
 - A Google account with permission to query the F3 data project
 
+## RHEL Google Cloud CLI Setup
+
+On the RHEL server, run the helper script from the repo:
+
+```sh
+cd /mnt/nas/node/f3po-slack-bot
+./scripts/setup-rhel-gcloud.sh
+```
+
+The script:
+
+1. Adds the Google Cloud CLI yum repository for RHEL 10, or the RHEL 9-compatible repo on older compatible systems.
+2. Installs `libxcrypt-compat.x86_64` and `google-cloud-cli`.
+3. Verifies `gcloud` and `bq`.
+4. Optionally runs interactive Application Default Credentials auth.
+5. Sets the project to `f3data`.
+6. Optionally runs `npm run backblasts:bigquery:dry-run`.
+
+To use a different project or repo path:
+
+```sh
+GOOGLE_CLOUD_PROJECT=f3data F3PO_REPO_DIR=/mnt/nas/node/f3po-slack-bot ./scripts/setup-rhel-gcloud.sh
+```
+
+After setup, the important commands are:
+
+```sh
+gcloud auth application-default login
+gcloud config set project f3data
+cd /mnt/nas/node/f3po-slack-bot
+npm run backblasts:bigquery:dry-run
+```
+
+If the server cannot open a browser, follow the URL/device-code flow printed by `gcloud`.
+
+## macOS Google Cloud CLI Setup
+
 On macOS with Homebrew:
 
 ```sh
