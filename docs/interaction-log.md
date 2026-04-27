@@ -15,6 +15,8 @@ Table: `bot_interactions`
 - thread/message timestamps
 - OpenAI model
 - answer source, such as `vector_store` or `web_search`
+- detected question tone, such as `factual`, `playful`, or `sensitive`
+- tone reason, which is a short note explaining the deterministic signal used
 - question text
 - response text
 - error text, when present
@@ -66,5 +68,15 @@ Direct SQL still works:
 
 ```sh
 sqlite3 export/google/f3po-conversations.sqlite \
-  "SELECT created_at, user_name, question_text, response_text FROM bot_interactions ORDER BY id DESC LIMIT 10;"
+  "SELECT created_at, user_name, question_tone, question_text, response_text FROM bot_interactions ORDER BY id DESC LIMIT 10;"
 ```
+
+## Tone Detection
+
+The bot classifies each handled message before routing. This is intentionally lightweight and deterministic:
+
+- `playful` means the message looks like harmless F3 ribbing, a joke, or facetious banter.
+- `factual` means no humor or sensitivity signal was detected.
+- `sensitive` means the message contains terms that should avoid joking, such as injury, prayer/COT, crisis, money, or contact/private-data topics.
+
+Tone is logged so we can review whether the bot is correctly recognizing jokes without sending every funny question into file search or web search.

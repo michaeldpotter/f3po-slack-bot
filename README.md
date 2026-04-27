@@ -175,4 +175,4 @@ F3PO should not invent Slack channel names. If it cannot answer an F3 Wichita te
 
 After the bot has replied in a thread, it can answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event.
 
-The bot also writes answered questions and responses to the local interaction SQLite database so they can be searched later. When `LOG_LEVEL=debug`, the terminal and daily log file record more detailed retrieval path and model/tool usage.
+The bot also writes answered questions and responses to the local interaction SQLite database so they can be searched later. Interaction rows include detected question tone (`factual`, `playful`, or `sensitive`) and a short tone reason. When `LOG_LEVEL=debug`, the terminal and daily log file record more detailed retrieval path, tone, and model/tool usage.

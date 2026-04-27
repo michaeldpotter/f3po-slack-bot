@@ -236,6 +236,8 @@ CREATE TABLE IF NOT EXISTS bot_interactions (
   message_ts TEXT,
   model TEXT,
   answer_source TEXT,
+  question_tone TEXT,
+  question_tone_reason TEXT,
   question_text TEXT NOT NULL,
   response_text TEXT NOT NULL,
   error TEXT
@@ -246,6 +248,9 @@ CREATE INDEX IF NOT EXISTS idx_bot_interactions_channel_id ON bot_interactions(c
 CREATE INDEX IF NOT EXISTS idx_bot_interactions_user_id ON bot_interactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_bot_interactions_thread_ts ON bot_interactions(thread_ts);
 `);
+
+    ensureInteractionColumn(db, "question_tone", "TEXT");
+    ensureInteractionColumn(db, "question_tone_reason", "TEXT");
 
     try {
       db.exec(`
@@ -268,6 +273,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS bot_interactions_fts USING fts5(
   } catch (err) {
     logLine("ERROR initializing interaction database:", err.stack || err.message || String(err), "error");
   }
+}
+
+function ensureInteractionColumn(db, columnName, columnType) {
+  const columns = db.prepare("PRAGMA table_info(bot_interactions)").all();
+  if (columns.some((column) => column.name === columnName)) return;
+  db.exec(`ALTER TABLE bot_interactions ADD COLUMN ${columnName} ${columnType}`);
 }
 
 function pruneInteractionLogs() {
@@ -325,6 +336,8 @@ function logInteraction({
   threadTs,
   messageTs,
   answerSource,
+  questionTone = "",
+  questionToneReason = "",
   questionText,
   responseText,
   error = "",
@@ -336,8 +349,9 @@ function logInteraction({
       .prepare(
         `INSERT INTO bot_interactions (
           created_at, trigger, channel_id, channel_label, user_id, user_name, user_label,
-          thread_ts, message_ts, model, answer_source, question_text, response_text, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          thread_ts, message_ts, model, answer_source, question_tone, question_tone_reason,
+          question_text, response_text, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         createdAt,
@@ -351,6 +365,8 @@ function logInteraction({
         messageTs || "",
         MODEL,
         answerSource || "",
+        questionTone || "",
+        questionToneReason || "",
         cleanSlackText(questionText || ""),
         responseText || "",
         error || ""
@@ -554,7 +570,64 @@ function isObviousChatter(text = "") {
   ].includes(cleaned);
 }
 
-function maybeAnswerPlayfulQuestion(text = "") {
+function classifyMessageTone(text = "") {
+  const cleaned = cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalized = cleaned.toLowerCase();
+
+  const seriousTerms =
+    /\b(injury|injured|hurt|pain|medical|doctor|hospital|death|died|prayer|prayers|cot|family|crisis|abuse|harass|harassment|racist|sexist|threat|suicide|depressed|payment|venmo|money|refund|address|phone|email)\b/;
+  if (seriousTerms.test(normalized)) {
+    return { tone: "sensitive", reason: "contains serious or sensitive terms" };
+  }
+
+  const mentionsChubbs = /\bchubbs\b/.test(normalized);
+  const chubbsHumor =
+    /\b(funny|joke|roast|rib|smile|smiled|awesome|legend|best|worst|nerd|wizard|robot|bot|creator)\b/.test(
+      normalized
+    ) ||
+    /\b(has|is|was|why|how|what)\b.*\bchubbs\b/.test(normalized) ||
+    /\bchubbs\b.*\?/.test(normalized);
+  const chubbsFactual =
+    /\b(tech\s*q|it\s*q|contact|created you|built you|who created|who built)\b/.test(normalized);
+
+  if (mentionsChubbs && chubbsHumor && !chubbsFactual) {
+    return { tone: "playful", reason: "Chubbs ribbing or praise pattern" };
+  }
+
+  const instructionalTerms =
+    /\b(how do|how to|perform|proper form|form check|what are some exercises|progression|modification|cadence)\b/;
+  if (instructionalTerms.test(normalized)) {
+    return { tone: "factual", reason: "instructional or exercise how-to question" };
+  }
+
+  const playfulPatterns = [
+    /\bhas\s+.+?\s+ever\s+(smiled|run|rucked|done|completed|survived|showed up)\b/,
+    /\bis\s+.+?\s+(capable of|able to|allergic to|afraid of)\b/,
+    /\bdoes\s+.+?\s+(know how to|even|actually)\b/,
+    /\bwhy\s+is\s+.+?\s+so\b/,
+    /\bprove\s+.+?\b/,
+    /\bevidence\b.*\b(smiled|smile|ran|run|burpee|coupon)\b/,
+    /\b(allegedly|myth|legend|rumor|scientifically|confirmed|unconfirmed)\b/,
+  ];
+  if (playfulPatterns.some((pattern) => pattern.test(normalized))) {
+    return { tone: "playful", reason: "matches harmless ribbing pattern" };
+  }
+
+  const playfulTopics =
+    /\b(smile|smiled|burpees?|coupons?|kilts?|coffee|cafeteria|allergic to running|dad bod|mumblechatter|glitter|spandex)\b/;
+  if (playfulTopics.test(normalized) && /\?/.test(cleaned)) {
+    return { tone: "playful", reason: "question uses common F3 humor topic" };
+  }
+
+  return { tone: "factual", reason: "no humor or sensitivity signal" };
+}
+
+function maybeAnswerPlayfulQuestion(text = "", toneResult = classifyMessageTone(text)) {
+  if (toneResult.tone !== "playful") return null;
+
   const cleaned = cleanSlackText(text)
     .replace(/<@[\w]+>/g, "")
     .replace(/\s+/g, " ")
@@ -593,7 +666,12 @@ function maybeAnswerPlayfulQuestion(text = "") {
     };
   }
 
-  return null;
+  return {
+    text:
+      "That feels less like a data request and more like premium-grade mumblechatter 😄. " +
+      "I’m going to mark it as plausible, unverified, and probably worth bringing up at coffeeteria.",
+    source: "playful_reply",
+  };
 }
 
 function threadHasBotReply(messages, botUserId) {
@@ -748,6 +826,7 @@ async function replyWithError(say, threadTs) {
 slackApp.event("app_mention", async ({ event, client, say, context }) => {
   const threadTs = event.thread_ts || event.ts;
   const labels = await getSlackContextLabels(client, event.channel, event.user);
+  const toneResult = classifyMessageTone(event.text);
 
   try {
     logBlock(
@@ -758,6 +837,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         channel: labels.channel,
         thread_ts: threadTs,
         message_ts: event.ts,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         text: formatTextForLog(event.text),
       },
       "debug"
@@ -772,6 +853,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           user: labels.user,
           channel: labels.channel,
           reason: "Channel is not in SLACK_ALLOWED_CHANNEL_IDS.",
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
           response: nudge,
         },
         "debug"
@@ -791,13 +874,15 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         threadTs,
         messageTs: event.ts,
         answerSource: "channel_blocked",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
         questionText: event.text,
         responseText: nudge,
       });
       return;
     }
 
-    const playfulReply = maybeAnswerPlayfulQuestion(event.text);
+    const playfulReply = maybeAnswerPlayfulQuestion(event.text, toneResult);
     if (playfulReply) {
       logBlock(
         "BOT PLAYFUL REPLY SENT",
@@ -808,6 +893,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           channel: labels.channel,
           thread_ts: threadTs,
           answer_source: playfulReply.source,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
           response: playfulReply.text,
         },
         "debug"
@@ -827,6 +914,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         threadTs,
         messageTs: event.ts,
         answerSource: playfulReply.source,
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
         questionText: event.text,
         responseText: playfulReply.text,
       });
@@ -847,6 +936,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           channel: labels.channel,
           thread_ts: threadTs,
           answer_source: reportingReply.source,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
           response: reportingReply.text,
         },
         "debug"
@@ -866,6 +957,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         threadTs,
         messageTs: event.ts,
         answerSource: reportingReply.source,
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
         questionText: event.text,
         responseText: reportingReply.text,
       });
@@ -878,6 +971,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         trigger: "app_mention",
         model: MODEL,
         responding_to: labels.userName,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -907,6 +1002,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         channel: labels.channel,
         thread_ts: threadTs,
         answer_source: reply.source,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         response: reply.text,
       },
       "debug"
@@ -926,6 +1023,8 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       threadTs,
       messageTs: event.ts,
       answerSource: reply.source,
+      questionTone: toneResult.tone,
+      questionToneReason: toneResult.reason,
       questionText: event.text,
       responseText: reply.text,
     });
@@ -945,6 +1044,7 @@ slackApp.message(async ({ message, client, say, context }) => {
     if (!isChannelAllowed(message.channel)) return;
 
     const labels = await getSlackContextLabels(client, message.channel, message.user);
+    const toneResult = classifyMessageTone(message.text);
 
     logBlock(
       "THREAD FOLLOW-UP RECEIVED",
@@ -954,6 +1054,8 @@ slackApp.message(async ({ message, client, say, context }) => {
         channel: labels.channel,
         thread_ts: threadTs,
         message_ts: message.ts,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         text: formatTextForLog(message.text),
       },
       "debug"
@@ -985,6 +1087,8 @@ slackApp.message(async ({ message, client, say, context }) => {
       {
         decision: replyDecision.decision,
         reason: replyDecision.reason,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         thread_messages_seen: threadMessages.length,
       },
       "debug"
@@ -994,7 +1098,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       return;
     }
 
-    const playfulReply = maybeAnswerPlayfulQuestion(message.text);
+    const playfulReply = maybeAnswerPlayfulQuestion(message.text, toneResult);
     if (playfulReply) {
       logBlock(
         "BOT PLAYFUL REPLY SENT",
@@ -1005,6 +1109,8 @@ slackApp.message(async ({ message, client, say, context }) => {
           channel: labels.channel,
           thread_ts: threadTs,
           answer_source: playfulReply.source,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
           response: playfulReply.text,
         },
         "debug"
@@ -1024,6 +1130,8 @@ slackApp.message(async ({ message, client, say, context }) => {
         threadTs,
         messageTs: message.ts,
         answerSource: playfulReply.source,
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
         questionText: message.text,
         responseText: playfulReply.text,
       });
@@ -1045,6 +1153,8 @@ slackApp.message(async ({ message, client, say, context }) => {
           channel: labels.channel,
           thread_ts: threadTs,
           answer_source: reportingReply.source,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
           response: reportingReply.text,
         },
         "debug"
@@ -1064,6 +1174,8 @@ slackApp.message(async ({ message, client, say, context }) => {
         threadTs,
         messageTs: message.ts,
         answerSource: reportingReply.source,
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
         questionText: message.text,
         responseText: reportingReply.text,
       });
@@ -1076,6 +1188,8 @@ slackApp.message(async ({ message, client, say, context }) => {
         trigger: "thread_follow_up",
         model: MODEL,
         responding_to: labels.userName,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -1105,6 +1219,8 @@ slackApp.message(async ({ message, client, say, context }) => {
         channel: labels.channel,
         thread_ts: threadTs,
         answer_source: reply.source,
+        tone: toneResult.tone,
+        tone_reason: toneResult.reason,
         response: reply.text,
       },
       "debug"
@@ -1124,6 +1240,8 @@ slackApp.message(async ({ message, client, say, context }) => {
       threadTs,
       messageTs: message.ts,
       answerSource: reply.source,
+      questionTone: toneResult.tone,
+      questionToneReason: toneResult.reason,
       questionText: message.text,
       responseText: reply.text,
     });

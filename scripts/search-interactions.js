@@ -63,6 +63,8 @@ function searchWithFts(db, query, limit) {
          i.channel_label,
          i.user_name,
          i.answer_source,
+         i.question_tone,
+         i.question_tone_reason,
          i.question_text,
          i.response_text,
          bm25(bot_interactions_fts) AS rank
@@ -86,6 +88,8 @@ function searchWithLike(db, query, limit) {
          channel_label,
          user_name,
          answer_source,
+         question_tone,
+         question_tone_reason,
          question_text,
          response_text
        FROM bot_interactions
@@ -112,6 +116,11 @@ function printRows(rows) {
     console.log(`user: ${row.user_name || "unknown"}`);
     console.log(`trigger: ${row.trigger || "unknown"}`);
     console.log(`source: ${row.answer_source || "unknown"}`);
+    console.log(
+      `tone: ${row.question_tone || "unknown"}${
+        row.question_tone_reason ? ` (${row.question_tone_reason})` : ""
+      }`
+    );
     console.log(`question: ${truncate(row.question_text || "")}`);
     console.log(`response: ${truncate(row.response_text || "")}`);
   }
