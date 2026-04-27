@@ -115,6 +115,13 @@ npm run backblasts:bigquery:dry-run
 npm run backblasts:bigquery
 ```
 
+Sync the local SQLite reporting database:
+
+```sh
+npm run reporting:sync:full
+npm run reporting:sync
+```
+
 Export the F3 Wichita YouTube index:
 
 ```sh
@@ -144,6 +151,7 @@ logs/                          Ignored daily runtime logs
 
 - [RAG and vector store](docs/rag.md)
 - [BigQuery backblast export](docs/bigquery-backblasts.md)
+- [Local reporting database](docs/reporting-db.md)
 - [YouTube export](docs/youtube-export.md)
 - [Deployment](docs/deployment.md)
 

@@ -37,6 +37,18 @@ Then verify:
 npm run backblasts:bigquery:dry-run
 ```
 
+To keep the local SQLite reporting database fresh, install the daily 3 AM reporting sync timer:
+
+```sh
+./scripts/install-reporting-sync-timer.sh
+```
+
+Run the timer under the same user that authenticated `gcloud`. Override the service user if needed:
+
+```sh
+F3PO_SERVICE_USER=mpotter ./scripts/install-reporting-sync-timer.sh
+```
+
 Create `/etc/systemd/system/f3po-slack-bot.service`:
 
 ```ini
