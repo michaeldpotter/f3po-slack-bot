@@ -554,6 +554,29 @@ function isObviousChatter(text = "") {
   ].includes(cleaned);
 }
 
+function maybeAnswerPlayfulQuestion(text = "") {
+  const cleaned = cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalized = cleaned.toLowerCase();
+
+  const smileMatch = normalized.match(/\bhas\s+(.+?)\s+ever\s+smiled\b/);
+  if (smileMatch) {
+    const rawName = cleaned.match(/\bhas\s+(.+?)\s+ever\s+smiled\b/i)?.[1] || "that PAX";
+    const name = rawName.trim().replace(/\s+/g, " ");
+    return {
+      text:
+        `I cannot confirm ${name} has ever smiled in a backblast photo. ` +
+        "The evidence remains suspiciously thin, which somehow feels very on-brand. " +
+        "I’ll mark it as possible, not yet proven.",
+      source: "playful_reply",
+    };
+  }
+
+  return null;
+}
+
 function threadHasBotReply(messages, botUserId) {
   return messages.some((m) => botUserId && m.user === botUserId);
 }
@@ -755,6 +778,42 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       return;
     }
 
+    const playfulReply = maybeAnswerPlayfulQuestion(event.text);
+    if (playfulReply) {
+      logBlock(
+        "BOT PLAYFUL REPLY SENT",
+        {
+          trigger: "app_mention",
+          user: labels.user,
+          responding_to: labels.userName,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          answer_source: playfulReply.source,
+          response: playfulReply.text,
+        },
+        "debug"
+      );
+
+      await say({
+        thread_ts: threadTs,
+        text: playfulReply.text,
+      });
+      logInteraction({
+        trigger: "app_mention",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: playfulReply.source,
+        questionText: event.text,
+        responseText: playfulReply.text,
+      });
+      return;
+    }
+
     const reportingReply = maybeAnswerReportingQuestion(event.text, {
       requesterName: labels.userName,
       botUserId: context.botUserId,
@@ -913,6 +972,42 @@ slackApp.message(async ({ message, client, say, context }) => {
     );
 
     if (!replyDecision.shouldReply) {
+      return;
+    }
+
+    const playfulReply = maybeAnswerPlayfulQuestion(message.text);
+    if (playfulReply) {
+      logBlock(
+        "BOT PLAYFUL REPLY SENT",
+        {
+          trigger: "thread_follow_up",
+          user: labels.user,
+          responding_to: labels.userName,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          answer_source: playfulReply.source,
+          response: playfulReply.text,
+        },
+        "debug"
+      );
+
+      await say({
+        thread_ts: threadTs,
+        text: playfulReply.text,
+      });
+      logInteraction({
+        trigger: "thread_follow_up",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: playfulReply.source,
+        questionText: message.text,
+        responseText: playfulReply.text,
+      });
       return;
     }
 
