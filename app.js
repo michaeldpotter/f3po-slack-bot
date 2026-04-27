@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
+const { DatabaseSync } = require("node:sqlite");
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
 
@@ -32,8 +33,16 @@ const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
 const LOG_RETENTION_DAYS = Number.parseInt(process.env.LOG_RETENTION_DAYS || "7", 10);
 const LOG_LEVEL = normalizeLogLevel(process.env.LOG_LEVEL || "info");
+const INTERACTION_DB_PATH =
+  process.env.INTERACTION_DB_PATH || path.join(__dirname, "export", "google", "f3po-conversations.sqlite");
+const INTERACTION_RETENTION_DAYS = Number.parseInt(
+  process.env.INTERACTION_RETENTION_DAYS || "365",
+  10
+);
 const slackUserCache = new Map();
 const slackChannelCache = new Map();
+let interactionDb;
+let interactionFtsEnabled = false;
 
 // Basic safety: keep thread context bounded
 const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
@@ -188,6 +197,171 @@ function logBlock(title, fields = {}, level = "info") {
   if (level === "error") console.error(text);
   else console.log(text);
   writeLogText(text);
+}
+
+function openInteractionDb() {
+  if (interactionDb) return interactionDb;
+
+  fs.mkdirSync(path.dirname(INTERACTION_DB_PATH), { recursive: true });
+  interactionDb = new DatabaseSync(INTERACTION_DB_PATH);
+  interactionDb.exec("PRAGMA journal_mode = WAL;");
+  interactionDb.exec("PRAGMA busy_timeout = 5000;");
+  return interactionDb;
+}
+
+function initInteractionDb() {
+  try {
+    const db = openInteractionDb();
+    db.exec(`
+CREATE TABLE IF NOT EXISTS bot_interactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  channel_id TEXT,
+  channel_label TEXT,
+  user_id TEXT,
+  user_name TEXT,
+  user_label TEXT,
+  thread_ts TEXT,
+  message_ts TEXT,
+  model TEXT,
+  answer_source TEXT,
+  question_text TEXT NOT NULL,
+  response_text TEXT NOT NULL,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_interactions_created_at ON bot_interactions(created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_interactions_channel_id ON bot_interactions(channel_id);
+CREATE INDEX IF NOT EXISTS idx_bot_interactions_user_id ON bot_interactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_bot_interactions_thread_ts ON bot_interactions(thread_ts);
+`);
+
+    try {
+      db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS bot_interactions_fts USING fts5(
+  question_text,
+  response_text,
+  user_name,
+  channel_label,
+  content='bot_interactions',
+  content_rowid='id'
+);
+`);
+      interactionFtsEnabled = true;
+    } catch (err) {
+      interactionFtsEnabled = false;
+      logLine("Interaction FTS unavailable:", err.message || String(err), "error");
+    }
+
+    pruneInteractionLogs();
+  } catch (err) {
+    logLine("ERROR initializing interaction database:", err.stack || err.message || String(err), "error");
+  }
+}
+
+function pruneInteractionLogs() {
+  if (!Number.isFinite(INTERACTION_RETENTION_DAYS) || INTERACTION_RETENTION_DAYS < 1) return;
+
+  try {
+    const db = openInteractionDb();
+    const cutoff = new Date(
+      Date.now() - INTERACTION_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const oldIds = db
+      .prepare("SELECT id FROM bot_interactions WHERE created_at < ?")
+      .all(cutoff)
+      .map((row) => row.id);
+
+    if (oldIds.length === 0) return;
+
+    db.exec("BEGIN");
+    try {
+      const deleteFts = interactionFtsEnabled
+        ? db.prepare("DELETE FROM bot_interactions_fts WHERE rowid = ?")
+        : null;
+      const deleteRow = db.prepare("DELETE FROM bot_interactions WHERE id = ?");
+
+      for (const id of oldIds) {
+        if (deleteFts) deleteFts.run(id);
+        deleteRow.run(id);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+
+    logBlock(
+      "INTERACTION DB CLEANUP",
+      {
+        removed_rows: oldIds.length,
+        retention_days: INTERACTION_RETENTION_DAYS,
+      },
+      "info"
+    );
+  } catch (err) {
+    logLine("ERROR pruning interaction database:", err.stack || err.message || String(err), "error");
+  }
+}
+
+function logInteraction({
+  trigger,
+  channelId,
+  channelLabel,
+  userId,
+  userName,
+  userLabel,
+  threadTs,
+  messageTs,
+  answerSource,
+  questionText,
+  responseText,
+  error = "",
+}) {
+  try {
+    const db = openInteractionDb();
+    const createdAt = nowIso();
+    const result = db
+      .prepare(
+        `INSERT INTO bot_interactions (
+          created_at, trigger, channel_id, channel_label, user_id, user_name, user_label,
+          thread_ts, message_ts, model, answer_source, question_text, response_text, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        createdAt,
+        trigger,
+        channelId || "",
+        channelLabel || "",
+        userId || "",
+        userName || "",
+        userLabel || "",
+        threadTs || "",
+        messageTs || "",
+        MODEL,
+        answerSource || "",
+        cleanSlackText(questionText || ""),
+        responseText || "",
+        error || ""
+      );
+
+    if (interactionFtsEnabled) {
+      db.prepare(
+        `INSERT INTO bot_interactions_fts (
+          rowid, question_text, response_text, user_name, channel_label
+        ) VALUES (?, ?, ?, ?, ?)`
+      ).run(
+        Number(result.lastInsertRowid),
+        cleanSlackText(questionText || ""),
+        responseText || "",
+        userName || "",
+        channelLabel || ""
+      );
+    }
+  } catch (err) {
+    logLine("ERROR writing interaction database:", err.stack || err.message || String(err), "error");
+  }
 }
 
 function formatTextForLog(text = "") {
@@ -512,6 +686,19 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         thread_ts: threadTs,
         text: nudge,
       });
+      logInteraction({
+        trigger: "app_mention_blocked",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: "channel_blocked",
+        questionText: event.text,
+        responseText: nudge,
+      });
       return;
     }
 
@@ -558,6 +745,19 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
     await say({
       thread_ts: threadTs,
       text: reply.text,
+    });
+    logInteraction({
+      trigger: "app_mention",
+      channelId: event.channel,
+      channelLabel: labels.channel,
+      userId: labels.userId,
+      userName: labels.userName,
+      userLabel: labels.user,
+      threadTs,
+      messageTs: event.ts,
+      answerSource: reply.source,
+      questionText: event.text,
+      responseText: reply.text,
     });
   } catch (err) {
     logLine("ERROR handling app_mention:", err.stack || err.message || String(err), "error");
@@ -668,6 +868,19 @@ slackApp.message(async ({ message, client, say, context }) => {
       thread_ts: threadTs,
       text: reply.text,
     });
+    logInteraction({
+      trigger: "thread_follow_up",
+      channelId: message.channel,
+      channelLabel: labels.channel,
+      userId: labels.userId,
+      userName: labels.userName,
+      userLabel: labels.user,
+      threadTs,
+      messageTs: message.ts,
+      answerSource: reply.source,
+      questionText: message.text,
+      responseText: reply.text,
+    });
   } catch (err) {
     logLine("ERROR handling message:", err.stack || err.message || String(err), "error");
     if (threadTs) await replyWithError(say, threadTs);
@@ -676,7 +889,9 @@ slackApp.message(async ({ message, client, say, context }) => {
 
 (async () => {
   cleanupOldLogs();
+  initInteractionDb();
   setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000).unref();
+  setInterval(pruneInteractionLogs, 24 * 60 * 60 * 1000).unref();
 
   await slackApp.start();
   logBlock("SLACK BOT RUNNING", {
@@ -688,5 +903,9 @@ slackApp.message(async ({ message, client, say, context }) => {
     log_dir: LOG_DIR,
     log_retention_days: Number.isFinite(LOG_RETENTION_DAYS) ? LOG_RETENTION_DAYS : 7,
     log_level: LOG_LEVEL,
+    interaction_db_path: INTERACTION_DB_PATH,
+    interaction_retention_days: Number.isFinite(INTERACTION_RETENTION_DAYS)
+      ? INTERACTION_RETENTION_DAYS
+      : 365,
   });
 })();

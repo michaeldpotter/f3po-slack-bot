@@ -64,6 +64,8 @@ GOOGLE_CLOUD_PROJECT=f3data
 LOG_DIR=logs
 LOG_RETENTION_DAYS=7
 LOG_LEVEL=info
+INTERACTION_DB_PATH=export/google/f3po-conversations.sqlite
+INTERACTION_RETENTION_DAYS=365
 ```
 
 Key env notes:
@@ -74,6 +76,7 @@ Key env notes:
 - `VECTOR_STORE_RESTART_SERVICE` defaults to `f3po-slack-bot.service`. Set it to `none` to disable automatic restart after vector store rebuilds.
 - `GOOGLE_CLOUD_PROJECT=f3data` is used by the local reporting sync.
 - `LOG_LEVEL` can be `error`, `info`, or `debug`.
+- `INTERACTION_DB_PATH` stores searchable bot questions/responses in local SQLite.
 
 `node_modules/`, `.env`, `export/`, daily logs, and private Wichita vectorstore docs are ignored by Git.
 
@@ -115,6 +118,12 @@ npm run reporting:sync:full
 npm run reporting:sync
 ```
 
+Search the local bot interaction database:
+
+```sh
+npm run interactions:search -- "IronPax"
+```
+
 Export the F3 Wichita YouTube index:
 
 ```sh
@@ -144,6 +153,7 @@ logs/                          Ignored daily runtime logs
 
 - [RAG and vector store](docs/rag.md)
 - [Local reporting database](docs/reporting-db.md)
+- [Bot interaction log](docs/interaction-log.md)
 - [YouTube export](docs/youtube-export.md)
 - [Deployment](docs/deployment.md)
 - [Server migration runbook](docs/server-migration.md)
@@ -158,4 +168,4 @@ F3PO should not invent Slack channel names. If it cannot answer an F3 Wichita te
 
 After the bot has replied in a thread, it can answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event.
 
-When `LOG_LEVEL=debug`, the terminal and daily log file record each bot interaction, retrieval path, model/tool usage, and response.
+The bot also writes answered questions and responses to the local interaction SQLite database so they can be searched later. When `LOG_LEVEL=debug`, the terminal and daily log file record more detailed retrieval path and model/tool usage.

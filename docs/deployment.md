@@ -102,6 +102,15 @@ Watch app logs:
 tail -f /mnt/nas/node/f3po-slack-bot/logs/f3po-$(date +%F).log
 ```
 
+Search bot question/response history:
+
+```sh
+cd /mnt/nas/node/f3po-slack-bot
+npm run interactions:search -- "IronPax"
+```
+
+The interaction database defaults to `export/google/f3po-conversations.sqlite` and is ignored by Git.
+
 Update an existing deployment:
 
 ```sh
