@@ -65,6 +65,7 @@ function searchWithFts(db, query, limit) {
          i.answer_source,
          i.question_tone,
          i.question_tone_reason,
+         i.elapsed_ms,
          i.question_text,
          i.response_text,
          bm25(bot_interactions_fts) AS rank
@@ -90,6 +91,7 @@ function searchWithLike(db, query, limit) {
          answer_source,
          question_tone,
          question_tone_reason,
+         elapsed_ms,
          question_text,
          response_text
        FROM bot_interactions
@@ -121,6 +123,7 @@ function printRows(rows) {
         row.question_tone_reason ? ` (${row.question_tone_reason})` : ""
       }`
     );
+    console.log(`elapsed: ${row.elapsed_ms ?? "unknown"} ms`);
     console.log(`question: ${truncate(row.question_text || "")}`);
     console.log(`response: ${truncate(row.response_text || "")}`);
   }

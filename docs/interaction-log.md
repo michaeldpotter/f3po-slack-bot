@@ -17,6 +17,7 @@ Table: `bot_interactions`
 - answer source, such as `vector_store` or `web_search`
 - detected question tone, such as `factual`, `playful`, or `sensitive`
 - tone reason, which is a short note explaining the deterministic signal used
+- elapsed response time in milliseconds
 - question text
 - response text
 - error text, when present
@@ -68,7 +69,7 @@ Direct SQL still works:
 
 ```sh
 sqlite3 export/google/f3po-conversations.sqlite \
-  "SELECT created_at, user_name, question_tone, question_text, response_text FROM bot_interactions ORDER BY id DESC LIMIT 10;"
+  "SELECT created_at, user_name, question_tone, elapsed_ms, question_text, response_text FROM bot_interactions ORDER BY id DESC LIMIT 10;"
 ```
 
 ## Tone Detection

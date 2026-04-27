@@ -61,6 +61,8 @@ const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
   "You help F3 Wichita PAX answer questions using Slack thread context, F3 documents, and approved web sources. " +
   "Be concise, practical, and lightly dry-humored. " +
+  "Format Slack replies cleanly: short answer first, bold section headers when helpful, compact bullets or numbered lists, and light contextual emoji only when it improves scanning. " +
+  "Avoid giant paragraphs; prefer 1-3 short sections with whitespace between them. " +
   "Stay on topic. Do not drift to discussing non-F3 topics. " +
   "Do not invent Slack channels, and do not tell users to post in a channel. " +
   "You are the bot, not a PAX and not a Q. Never say or imply that you are Qing, calling Q, leading, attending, or choosing a workout. " +
@@ -166,6 +168,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function elapsedMsSince(startedAt) {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
 function todayLogPath() {
   return path.join(LOG_DIR, `f3po-${new Date().toISOString().slice(0, 10)}.log`);
 }
@@ -238,6 +244,7 @@ CREATE TABLE IF NOT EXISTS bot_interactions (
   answer_source TEXT,
   question_tone TEXT,
   question_tone_reason TEXT,
+  elapsed_ms INTEGER,
   question_text TEXT NOT NULL,
   response_text TEXT NOT NULL,
   error TEXT
@@ -251,6 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_interactions_thread_ts ON bot_interactions(th
 
     ensureInteractionColumn(db, "question_tone", "TEXT");
     ensureInteractionColumn(db, "question_tone_reason", "TEXT");
+    ensureInteractionColumn(db, "elapsed_ms", "INTEGER");
 
     try {
       db.exec(`
@@ -338,6 +346,7 @@ function logInteraction({
   answerSource,
   questionTone = "",
   questionToneReason = "",
+  elapsedMs = null,
   questionText,
   responseText,
   error = "",
@@ -350,8 +359,8 @@ function logInteraction({
         `INSERT INTO bot_interactions (
           created_at, trigger, channel_id, channel_label, user_id, user_name, user_label,
           thread_ts, message_ts, model, answer_source, question_tone, question_tone_reason,
-          question_text, response_text, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          elapsed_ms, question_text, response_text, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         createdAt,
@@ -367,6 +376,7 @@ function logInteraction({
         answerSource || "",
         questionTone || "",
         questionToneReason || "",
+        Number.isFinite(elapsedMs) ? Math.round(elapsedMs) : null,
         cleanSlackText(questionText || ""),
         responseText || "",
         error || ""
@@ -442,12 +452,19 @@ async function getSlackChannelLabel(client, channelId) {
 }
 
 async function getSlackContextLabels(client, channelId, userId) {
+  const startedAt = process.hrtime.bigint();
   const [channel, userContext] = await Promise.all([
     getSlackChannelLabel(client, channelId),
     getSlackUserContext(client, userId),
   ]);
 
-  return { channel, user: userContext.label, userName: userContext.name, userId: userContext.id };
+  return {
+    channel,
+    user: userContext.label,
+    userName: userContext.name,
+    userId: userContext.id,
+    elapsedMs: elapsedMsSince(startedAt),
+  };
 }
 
 function cleanupOldLogs() {
@@ -495,6 +512,7 @@ function truncate(s, max) {
 }
 
 async function fetchThreadMessages(client, channel, threadTs) {
+  const startedAt = process.hrtime.bigint();
   // conversations.replies returns the parent + replies
   const res = await client.conversations.replies({
     channel,
@@ -510,7 +528,12 @@ async function fetchThreadMessages(client, channel, threadTs) {
     .filter((m) => typeof m.text === "string" && m.text.trim().length > 0);
 
   // Keep the most recent N messages to limit prompt growth
-  return messages.slice(Math.max(0, messages.length - MAX_THREAD_MESSAGES));
+  const sliced = messages.slice(Math.max(0, messages.length - MAX_THREAD_MESSAGES));
+  Object.defineProperty(sliced, "elapsedMs", {
+    value: elapsedMsSince(startedAt),
+    enumerable: false,
+  });
+  return sliced;
 }
 
 function threadToModelInput(messages, botUserId, respondingToName) {
@@ -726,21 +749,29 @@ function shouldUseNameInReply(name) {
 }
 
 async function generateReply(client, channel, threadTs, botUserId, respondingToName) {
+  const totalStartedAt = process.hrtime.bigint();
   const threadMessages = await fetchThreadMessages(client, channel, threadTs);
   const chatInput = threadToModelInput(threadMessages, botUserId, respondingToName);
 
+  const vectorStartedAt = process.hrtime.bigint();
   const vectorResp = await openai.responses.create({
     model: MODEL,
     instructions: VECTOR_ONLY_INSTRUCTIONS,
     input: chatInput,
     tools: buildResponseTools({ includeFileSearch: true }),
   });
+  const vectorElapsedMs = elapsedMsSince(vectorStartedAt);
 
   const vectorReply = sanitizeModelReply(vectorResp.output_text || "");
   if (!needsWebSearch(vectorReply)) {
     return {
       text: vectorReply || "I couldn't generate a response.",
       source: "vector_store",
+      elapsedMs: elapsedMsSince(totalStartedAt),
+      timings: {
+        thread_fetch_ms: threadMessages.elapsedMs,
+        vector_ms: vectorElapsedMs,
+      },
     };
   }
 
@@ -748,6 +779,11 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
     return {
       text: "I couldn't find that in the uploaded docs, and web search is not enabled.",
       source: "vector_store_no_answer",
+      elapsedMs: elapsedMsSince(totalStartedAt),
+      timings: {
+        thread_fetch_ms: threadMessages.elapsedMs,
+        vector_ms: vectorElapsedMs,
+      },
     };
   }
 
@@ -760,20 +796,29 @@ async function generateReply(client, channel, threadTs, botUserId, respondingToN
     "debug"
   );
 
+  const webStartedAt = process.hrtime.bigint();
   const webResp = await openai.responses.create({
     model: MODEL,
     instructions: WEB_FALLBACK_INSTRUCTIONS,
     input: chatInput,
     tools: buildResponseTools({ includeFileSearch: false, includeWebSearch: true }),
   });
+  const webElapsedMs = elapsedMsSince(webStartedAt);
 
   return {
     text: sanitizeModelReply(webResp.output_text || "") || "I couldn't generate a response.",
     source: "web_search",
+    elapsedMs: elapsedMsSince(totalStartedAt),
+    timings: {
+      thread_fetch_ms: threadMessages.elapsedMs,
+      vector_ms: vectorElapsedMs,
+      web_ms: webElapsedMs,
+    },
   };
 }
 
 async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
+  const startedAt = process.hrtime.bigint();
   const text = latestMessage.text || "";
 
   if (isBotMentioned(text, botUserId)) {
@@ -781,6 +826,7 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
       shouldReply: true,
       decision: "YES",
       reason: "The bot was mentioned in the follow-up.",
+      elapsedMs: elapsedMsSince(startedAt),
     };
   }
   if (isObviousChatter(text)) {
@@ -788,6 +834,7 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
       shouldReply: false,
       decision: "NO",
       reason: "Obvious acknowledgement/chatter.",
+      elapsedMs: elapsedMsSince(startedAt),
     };
   }
   if (isQuestionLike(text)) {
@@ -797,10 +844,12 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
         shouldReply: true,
         decision: "YES",
         reason: "The previous bot reply invited a follow-up and the latest message asks a question.",
+        elapsedMs: elapsedMsSince(startedAt),
       };
     }
   }
 
+  const classifierStartedAt = process.hrtime.bigint();
   const recentThread = threadToModelInput(messages, botUserId)
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
@@ -816,6 +865,7 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
       `Thread transcript:\n${recentThread}\n\n` +
       `Latest message:\n${cleanSlackText(text)}`,
   });
+  const classifierElapsedMs = elapsedMsSince(classifierStartedAt);
 
   const rawDecision = (resp.output_text || "").trim();
   const decision = rawDecision.toUpperCase().startsWith("YES") ? "YES" : "NO";
@@ -823,6 +873,8 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
     shouldReply: decision === "YES",
     decision,
     reason: rawDecision || "(empty classifier response)",
+    elapsedMs: elapsedMsSince(startedAt),
+    classifierMs: classifierElapsedMs,
   };
 }
 
@@ -834,6 +886,7 @@ async function replyWithError(say, threadTs) {
 }
 
 slackApp.event("app_mention", async ({ event, client, say, context }) => {
+  const requestStartedAt = process.hrtime.bigint();
   const threadTs = event.thread_ts || event.ts;
   const labels = await getSlackContextLabels(client, event.channel, event.user);
   const toneResult = classifyMessageTone(event.text);
@@ -849,6 +902,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         message_ts: event.ts,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        slack_context_ms: labels.elapsedMs?.toFixed?.(1),
         text: formatTextForLog(event.text),
       },
       "debug"
@@ -865,6 +919,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           reason: "Channel is not in SLACK_ALLOWED_CHANNEL_IDS.",
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
           response: nudge,
         },
         "debug"
@@ -886,6 +941,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         answerSource: "channel_blocked",
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: event.text,
         responseText: nudge,
       });
@@ -905,6 +961,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           answer_source: playfulReply.source,
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
           response: playfulReply.text,
         },
         "debug"
@@ -926,6 +983,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         answerSource: playfulReply.source,
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: event.text,
         responseText: playfulReply.text,
       });
@@ -948,6 +1006,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
           answer_source: reportingReply.source,
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
           response: reportingReply.text,
         },
         "debug"
@@ -969,6 +1028,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         answerSource: reportingReply.source,
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: event.text,
         responseText: reportingReply.text,
       });
@@ -983,6 +1043,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         responding_to: labels.userName,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        slack_context_ms: labels.elapsedMs?.toFixed?.(1),
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -1014,6 +1075,9 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         answer_source: reply.source,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        reply_elapsed_ms: reply.elapsedMs?.toFixed?.(1),
+        timings: reply.timings ? JSON.stringify(reply.timings) : "",
         response: reply.text,
       },
       "debug"
@@ -1035,6 +1099,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       answerSource: reply.source,
       questionTone: toneResult.tone,
       questionToneReason: toneResult.reason,
+      elapsedMs: elapsedMsSince(requestStartedAt),
       questionText: event.text,
       responseText: reply.text,
     });
@@ -1045,6 +1110,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
 });
 
 slackApp.message(async ({ message, client, say, context }) => {
+  const requestStartedAt = process.hrtime.bigint();
   const threadTs = message.thread_ts;
 
   try {
@@ -1066,6 +1132,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         message_ts: message.ts,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        slack_context_ms: labels.elapsedMs?.toFixed?.(1),
         text: formatTextForLog(message.text),
       },
       "debug"
@@ -1083,6 +1150,7 @@ slackApp.message(async ({ message, client, say, context }) => {
           reason: skippedReason,
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
         },
         "debug"
       );
@@ -1098,6 +1166,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         answerSource: "thread_skipped",
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: message.text,
         responseText: skippedReason,
       });
@@ -1110,6 +1179,7 @@ slackApp.message(async ({ message, client, say, context }) => {
             shouldReply: true,
             decision: "YES",
             reason: "Playful question-like follow-up in a thread where the bot has already replied.",
+            elapsedMs: 0,
           }
         : await shouldReplyToThreadMessage(threadMessages, context.botUserId, message);
 
@@ -1120,6 +1190,9 @@ slackApp.message(async ({ message, client, say, context }) => {
         reason: replyDecision.reason,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        decision_elapsed_ms: replyDecision.elapsedMs?.toFixed?.(1),
+        classifier_ms: replyDecision.classifierMs?.toFixed?.(1),
+        thread_fetch_ms: threadMessages.elapsedMs?.toFixed?.(1),
         thread_messages_seen: threadMessages.length,
       },
       "debug"
@@ -1138,6 +1211,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         answerSource: "thread_skipped",
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: message.text,
         responseText: replyDecision.reason || "Thread follow-up was not directed at the bot.",
       });
@@ -1157,6 +1231,7 @@ slackApp.message(async ({ message, client, say, context }) => {
           answer_source: playfulReply.source,
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
           response: playfulReply.text,
         },
         "debug"
@@ -1178,6 +1253,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         answerSource: playfulReply.source,
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: message.text,
         responseText: playfulReply.text,
       });
@@ -1201,6 +1277,7 @@ slackApp.message(async ({ message, client, say, context }) => {
           answer_source: reportingReply.source,
           tone: toneResult.tone,
           tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
           response: reportingReply.text,
         },
         "debug"
@@ -1222,6 +1299,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         answerSource: reportingReply.source,
         questionTone: toneResult.tone,
         questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: message.text,
         responseText: reportingReply.text,
       });
@@ -1236,6 +1314,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         responding_to: labels.userName,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        slack_context_ms: labels.elapsedMs?.toFixed?.(1),
         first_pass_tools: buildResponseTools({ includeFileSearch: true })
           .map((tool) => tool.type)
           .join(", "),
@@ -1267,6 +1346,9 @@ slackApp.message(async ({ message, client, say, context }) => {
         answer_source: reply.source,
         tone: toneResult.tone,
         tone_reason: toneResult.reason,
+        elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        reply_elapsed_ms: reply.elapsedMs?.toFixed?.(1),
+        timings: reply.timings ? JSON.stringify(reply.timings) : "",
         response: reply.text,
       },
       "debug"
@@ -1288,6 +1370,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       answerSource: reply.source,
       questionTone: toneResult.tone,
       questionToneReason: toneResult.reason,
+      elapsedMs: elapsedMsSince(requestStartedAt),
       questionText: message.text,
       responseText: reply.text,
     });
