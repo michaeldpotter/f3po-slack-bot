@@ -609,6 +609,7 @@ function classifyMessageTone(text = "") {
     /\bdoes\s+.+?\s+(know how to|even|actually)\b/,
     /\bwhy\s+is\s+.+?\s+so\b/,
     /\bprove\s+.+?\b/,
+    /\b(are you sure|seems sus|that seems sus|suspect|suspicious)\b/,
     /\bevidence\b.*\b(smiled|smile|ran|run|burpee|coupon)\b/,
     /\b(allegedly|myth|legend|rumor|scientifically|confirmed|unconfirmed)\b/,
   ];
@@ -650,6 +651,15 @@ function maybeAnswerPlayfulQuestion(text = "", toneResult = classifyMessageTone(
         "Chubbs? Elite HIM 🫡. Built F3PO, keeps the tech lights on 💻, and somehow still finds time to make bad ideas work. " +
         "I’m contractually obligated to say he is awesome, but inconveniently, the evidence supports it ⚡.",
       source: "playful_reply_chubbs",
+    };
+  }
+
+  if (/\b(are you sure|seems sus|that seems sus|suspect|suspicious)\b/.test(normalized)) {
+    return {
+      text:
+        "Sus vibes acknowledged 🕵️. But if the finisher sheet has him that high, the spreadsheet has spoken. " +
+        "Apparently somebody found the turbo button and failed to disclose it to the rest of the PAX.",
+      source: "playful_reply",
     };
   }
 
