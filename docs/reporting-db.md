@@ -152,6 +152,12 @@ Blocked response:
 I can’t report recent individual attendance or location patterns. I can help with aggregate AO activity, FNG counts, Q counts, or longer-range non-current trends.
 ```
 
+For reporting/stat questions that are not yet wired into F3PO’s approved report templates, the bot points users to PAX Vault:
+
+```text
+I don’t have that report type wired in yet. You may want to check PAX Vault: https://pax-vault.f3nation.com/
+```
+
 Inspect recent sync runs:
 
 ```sh
