@@ -8,6 +8,7 @@
     "rag:setup": "node scripts/rag-setup.js",
     "rag:rebuild": "node scripts/rag-setup.js rebuild",
     "rag:add": "node scripts/rag-setup.js add",
+    "rag:prune": "node scripts/rag-setup.js prune",
     "reporting:sync": "node scripts/sync-reporting-db.js",
     "reporting:sync:full": "node scripts/sync-reporting-db.js --full",
     "reporting:sync:dry-run": "node scripts/sync-reporting-db.js --dry-run",

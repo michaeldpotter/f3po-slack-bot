@@ -3,6 +3,7 @@
 // Usage:
 //   node scripts/rag-setup.js rebuild [docsDir] [--force]
 //   node scripts/rag-setup.js add [docsDir] [--force]
+//   node scripts/rag-setup.js prune [docsDir] [--force]
 //
 // Defaults:
 //   mode: rebuild
@@ -11,6 +12,7 @@
 // Modes:
 //   rebuild - creates a new vector store, uploads all docs, and updates VECTOR_STORE_ID in .env
 //   add     - uploads only new/changed docs into the existing VECTOR_STORE_ID
+//   prune   - removes vector store files whose source files no longer exist locally
 
 require("dotenv").config();
 
@@ -44,16 +46,19 @@ function printUsage() {
 Usage:
   node scripts/rag-setup.js rebuild [docsDir] [--force]
   node scripts/rag-setup.js add [docsDir] [--force]
+  node scripts/rag-setup.js prune [docsDir] [--force]
 
 Examples:
   node scripts/rag-setup.js rebuild
   node scripts/rag-setup.js rebuild ./vectorstore
   node scripts/rag-setup.js add ./vectorstore
+  node scripts/rag-setup.js prune ./vectorstore
   node scripts/rag-setup.js rebuild ~/Documents/f3-docs --force
 
 Notes:
   - rebuild creates a new vector store and writes its ID to .env.
   - add uses the current VECTOR_STORE_ID and uploads only new or changed files.
+  - prune removes vector store entries whose source_path is no longer present locally.
   - docsDir defaults to VECTOR_STORE_SOURCE_DIR or ./vectorstore.
   - docsDir must be inside ./vectorstore unless --force is passed.
 `);
@@ -69,7 +74,7 @@ function parseArgs(argv) {
     return { help: true };
   }
 
-  if (first === "rebuild" || first === "add") {
+  if (first === "rebuild" || first === "add" || first === "prune") {
     return {
       mode: first,
       docsDir: positional[1] || DEFAULT_DOCS_DIR,
@@ -421,6 +426,41 @@ async function add(files) {
   console.log(`VECTOR_STORE_ID=${vectorStoreId}`);
 }
 
+async function prune(files) {
+  const vectorStoreId = requireEnv("VECTOR_STORE_ID");
+  console.log(`Using existing vector store: ${vectorStoreId}`);
+
+  const localPaths = new Set(files.map((file) => file.sourcePath));
+  const remoteFiles = await listVectorStoreFiles(vectorStoreId);
+  let removed = 0;
+  let kept = 0;
+  let skipped = 0;
+
+  for (const remoteFile of remoteFiles) {
+    const sourcePath = remoteFile.attributes?.source_path;
+    if (!sourcePath) {
+      skipped += 1;
+      continue;
+    }
+
+    if (localPaths.has(sourcePath)) {
+      kept += 1;
+      continue;
+    }
+
+    process.stdout.write(`Removing deleted source from vector store: ${sourcePath} (${remoteFile.id}) ... `);
+    await removeVectorStoreFile(vectorStoreId, remoteFile.id);
+    removed += 1;
+    console.log("OK");
+  }
+
+  console.log(`Kept vector entries with local source files: ${kept}`);
+  console.log(`Removed vector entries without local source files: ${removed}`);
+  console.log(`Skipped vector entries without source_path metadata: ${skipped}`);
+  console.log("\nVector store pruned.");
+  console.log(`VECTOR_STORE_ID=${vectorStoreId}`);
+}
+
 async function main() {
   const { help, mode, docsDir, force } = parseArgs(process.argv);
 
@@ -444,6 +484,11 @@ async function main() {
 
   if (mode === "add") {
     await add(files);
+    return;
+  }
+
+  if (mode === "prune") {
+    await prune(files);
     return;
   }
 

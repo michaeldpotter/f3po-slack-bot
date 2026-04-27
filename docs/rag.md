@@ -39,6 +39,12 @@ npm run rag:add
 
 `rag:add` uses the current `VECTOR_STORE_ID` from `.env`. New or changed files are uploaded and tagged with their source path and content hash. If a local file changed, the old vector store entry for that source path is removed and the updated file is uploaded.
 
+If you delete a local source file, run prune to remove the deleted source from the existing vector store:
+
+```sh
+npm run rag:prune
+```
+
 You can also add from a specific folder:
 
 ```sh
@@ -82,4 +88,5 @@ Direct usage:
 node scripts/rag-setup.js --help
 node scripts/rag-setup.js rebuild ./vectorstore
 node scripts/rag-setup.js add ./vectorstore
+node scripts/rag-setup.js prune ./vectorstore
 ```

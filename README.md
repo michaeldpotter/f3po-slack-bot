@@ -105,6 +105,12 @@ Update the vector store with new or changed local docs:
 npm run rag:add
 ```
 
+Remove vector store entries whose source files were deleted locally:
+
+```sh
+npm run rag:prune
+```
+
 Rebuild the vector store from scratch:
 
 ```sh
