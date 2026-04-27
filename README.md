@@ -2,7 +2,7 @@
 
 F3PO connects Slack Socket Mode, OpenAI, and an OpenAI vector store so Slack users can ask questions against thread context plus an uploaded document library.
 
-This is RAG, not model training: the repo gives the model a searchable notebook to reference. F3PO becomes F3-aware when you upload F3-specific docs such as SOPs, AO rules, event notes, FAQs, Q-source summaries, leadership notes, meeting notes, YouTube summaries, and redacted BigQuery backblasts.
+This is RAG, not model training: the repo gives the model a searchable notebook to reference. F3PO becomes F3-aware when you upload F3-specific docs such as SOPs, AO rules, event notes, FAQs, Q-source summaries, leadership notes, meeting notes, and YouTube summaries.
 
 ## How It Works
 
@@ -37,7 +37,7 @@ Useful example questions:
 - A Slack app with Socket Mode enabled
 - An OpenAI API key
 - Documents under `vectorstore/` to upload into an OpenAI vector store
-- Optional for BigQuery backblast exports: Google Cloud CLI (`gcloud`) and access to the F3 data project
+- Optional for local reporting sync: Google Cloud CLI (`gcloud`) and access to the F3 data project
 
 Socket Mode means the bot does not need port forwarding, a public URL, a reverse proxy, or Cloudflare Tunnel. It does need to run continuously on a machine such as a homelab server, Mac mini, Linux box, container, or VPS.
 
@@ -72,7 +72,7 @@ Key env notes:
 - `WEB_SEARCH_ALLOWED_DOMAINS` is optional. Use comma-separated bare domains like `f3nation.com`; do not include `https://`.
 - `VECTOR_STORE_SOURCE_DIR` defaults to `vectorstore`.
 - `VECTOR_STORE_RESTART_SERVICE` defaults to `f3po-slack-bot.service`. Set it to `none` to disable automatic restart after vector store rebuilds.
-- `GOOGLE_CLOUD_PROJECT=f3data` is used by the BigQuery backblast exporter.
+- `GOOGLE_CLOUD_PROJECT=f3data` is used by the local reporting sync.
 - `LOG_LEVEL` can be `error`, `info`, or `debug`.
 
 `node_modules/`, `.env`, `export/`, daily logs, and private Wichita vectorstore docs are ignored by Git.
@@ -106,13 +106,6 @@ Rebuild the vector store from scratch:
 
 ```sh
 npm run rag:rebuild
-```
-
-Export redacted BigQuery backblasts:
-
-```sh
-npm run backblasts:bigquery:dry-run
-npm run backblasts:bigquery
 ```
 
 Sync the local SQLite reporting database:
@@ -150,10 +143,10 @@ logs/                          Ignored daily runtime logs
 ## More Docs
 
 - [RAG and vector store](docs/rag.md)
-- [BigQuery backblast export](docs/bigquery-backblasts.md)
 - [Local reporting database](docs/reporting-db.md)
 - [YouTube export](docs/youtube-export.md)
 - [Deployment](docs/deployment.md)
+- [Server migration runbook](docs/server-migration.md)
 
 ## Behavior Notes
 

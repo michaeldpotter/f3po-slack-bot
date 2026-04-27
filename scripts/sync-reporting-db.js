@@ -20,6 +20,7 @@ const DEFAULT_EVENT_TABLE = "analytics.event_info";
 const DEFAULT_ATTENDANCE_TABLE = "analytics.attendance_info";
 const DEFAULT_REGION_ORG_ID = 36533;
 const DEFAULT_INCREMENTAL_DAYS = 2;
+const DEFAULT_SYNC_LOG_RETENTION_DAYS = 90;
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -35,11 +36,21 @@ function parseArgs(argv) {
   if (!Number.isInteger(days) || days < 1 || days > 3660) {
     throw new Error("--days must be an integer between 1 and 3660.");
   }
+  const logRetentionDays = Number.parseInt(
+    valueAfter("--log-retention-days") ||
+      process.env.REPORTING_SYNC_LOG_RETENTION_DAYS ||
+      DEFAULT_SYNC_LOG_RETENTION_DAYS,
+    10
+  );
+  if (!Number.isInteger(logRetentionDays) || logRetentionDays < 1 || logRetentionDays > 3660) {
+    throw new Error("--log-retention-days must be an integer between 1 and 3660.");
+  }
 
   return {
     full: args.includes("--full"),
     dryRun: args.includes("--dry-run"),
     days,
+    logRetentionDays,
     dbPath: valueAfter("--db") || process.env.REPORTING_DB_PATH || DEFAULT_DB_PATH,
     eventTable: valueAfter("--event-table") || process.env.REPORTING_EVENT_TABLE || DEFAULT_EVENT_TABLE,
     attendanceTable:
@@ -161,12 +172,44 @@ CREATE TABLE IF NOT EXISTS sync_state (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sync_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  mode TEXT NOT NULL,
+  cutoff TEXT,
+  status TEXT NOT NULL,
+  fetched_events INTEGER NOT NULL DEFAULT 0,
+  fetched_attendance INTEGER NOT NULL DEFAULT 0,
+  added_events INTEGER NOT NULL DEFAULT 0,
+  updated_events INTEGER NOT NULL DEFAULT 0,
+  added_attendance INTEGER NOT NULL DEFAULT 0,
+  updated_attendance INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sync_record_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL,
+  logged_at TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  record_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  record_date TEXT,
+  display_name TEXT,
+  details_json TEXT,
+  FOREIGN KEY(run_id) REFERENCES sync_runs(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_start_date ON events(start_date);
 CREATE INDEX IF NOT EXISTS idx_events_updated ON events(updated);
 CREATE INDEX IF NOT EXISTS idx_events_ao ON events(ao_name);
 CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_instance_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_updated ON attendance(updated);
 CREATE INDEX IF NOT EXISTS idx_attendance_f3_name ON attendance(f3_name);
+CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON sync_runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_sync_record_log_run ON sync_record_log(run_id);
+CREATE INDEX IF NOT EXISTS idx_sync_record_log_logged ON sync_record_log(logged_at);
 `);
 }
 
@@ -178,6 +221,55 @@ function setSyncState(db, key, value) {
   db.prepare(
     "INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
   ).run(key, value, new Date().toISOString());
+}
+
+function startSyncRun(db, { mode, cutoff, startedAt }) {
+  const result = db
+    .prepare("INSERT INTO sync_runs (started_at, mode, cutoff, status) VALUES (?, ?, ?, ?)")
+    .run(startedAt, mode, cutoff || "", "started");
+  return Number(result.lastInsertRowid);
+}
+
+function finishSyncRun(db, runId, stats, error = "") {
+  db.prepare(
+    `UPDATE sync_runs
+     SET finished_at = ?,
+         status = ?,
+         fetched_events = ?,
+         fetched_attendance = ?,
+         added_events = ?,
+         updated_events = ?,
+         added_attendance = ?,
+         updated_attendance = ?,
+         error = ?
+     WHERE id = ?`
+  ).run(
+    new Date().toISOString(),
+    error ? "failed" : "completed",
+    stats.fetchedEvents || 0,
+    stats.fetchedAttendance || 0,
+    stats.addedEvents || 0,
+    stats.updatedEvents || 0,
+    stats.addedAttendance || 0,
+    stats.updatedAttendance || 0,
+    error,
+    runId
+  );
+}
+
+function pruneSyncLogs(db, retentionDays) {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const recordResult = db
+    .prepare("DELETE FROM sync_record_log WHERE logged_at < ?")
+    .run(cutoff);
+  const runResult = db
+    .prepare("DELETE FROM sync_runs WHERE started_at < ?")
+    .run(cutoff);
+  return {
+    cutoff,
+    deletedRecordLogs: recordResult.changes || 0,
+    deletedRuns: runResult.changes || 0,
+  };
 }
 
 function incrementalCutoff(db, days) {
@@ -240,7 +332,7 @@ ORDER BY a.updated ASC, a.id ASC
   return rows;
 }
 
-function upsertEvents(db, rows, syncedAt) {
+function upsertEvents(db, rows, syncedAt, runId) {
   const stmt = db.prepare(`
 INSERT INTO events (
   id, region_org_id, start_date, end_date, start_time, end_time, name, description,
@@ -290,10 +382,18 @@ ON CONFLICT(id) DO UPDATE SET
   updated = excluded.updated,
   synced_at = excluded.synced_at
 `);
+  const existsStmt = db.prepare("SELECT 1 FROM events WHERE id = ?");
+  const logStmt = db.prepare(`
+INSERT INTO sync_record_log (
+  run_id, logged_at, table_name, record_id, action, record_date, display_name, details_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+  const stats = { added: 0, updated: 0 };
 
   db.exec("BEGIN");
   try {
     for (const row of rows) {
+      const action = existsStmt.get(row.id) ? "updated" : "added";
       stmt.run(
         row.id,
         row.region_org_id,
@@ -333,15 +433,37 @@ ON CONFLICT(id) DO UPDATE SET
         normalizeTimestamp(row.updated),
         syncedAt
       );
+      if (action === "added") stats.added += 1;
+      else stats.updated += 1;
+      logStmt.run(
+        runId,
+        syncedAt,
+        "events",
+        row.id,
+        action,
+        normalizeDate(row.start_date),
+        [row.start_date && normalizeDate(row.start_date), row.ao_name, row.name]
+          .filter(Boolean)
+          .join(" - "),
+        jsonString({
+          ao_name: row.ao_name || "",
+          name: row.name || "",
+          start_date: normalizeDate(row.start_date),
+          updated: normalizeTimestamp(row.updated),
+          pax_count: row.pax_count ?? 0,
+          fng_count: row.fng_count ?? 0,
+        })
+      );
     }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
   }
+  return stats;
 }
 
-function upsertAttendance(db, rows, syncedAt) {
+function upsertAttendance(db, rows, syncedAt, runId) {
   const stmt = db.prepare(`
 INSERT INTO attendance (
   id, user_id, event_instance_id, attendance_meta_json, created, updated,
@@ -363,10 +485,18 @@ ON CONFLICT(id) DO UPDATE SET
   start_date = excluded.start_date,
   synced_at = excluded.synced_at
 `);
+  const existsStmt = db.prepare("SELECT 1 FROM attendance WHERE id = ?");
+  const logStmt = db.prepare(`
+INSERT INTO sync_record_log (
+  run_id, logged_at, table_name, record_id, action, record_date, display_name, details_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+  const stats = { added: 0, updated: 0 };
 
   db.exec("BEGIN");
   try {
     for (const row of rows) {
+      const action = existsStmt.get(row.id) ? "updated" : "added";
       stmt.run(
         row.id,
         row.user_id,
@@ -383,12 +513,34 @@ ON CONFLICT(id) DO UPDATE SET
         normalizeDate(row.start_date),
         syncedAt
       );
+      if (action === "added") stats.added += 1;
+      else stats.updated += 1;
+      logStmt.run(
+        runId,
+        syncedAt,
+        "attendance",
+        row.id,
+        action,
+        normalizeDate(row.start_date),
+        [row.start_date && normalizeDate(row.start_date), row.f3_name]
+          .filter(Boolean)
+          .join(" - "),
+        jsonString({
+          event_instance_id: row.event_instance_id,
+          f3_name: row.f3_name || "",
+          start_date: normalizeDate(row.start_date),
+          updated: normalizeTimestamp(row.updated),
+          q_ind: row.q_ind ?? 0,
+          coq_ind: row.coq_ind ?? 0,
+        })
+      );
     }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
   }
+  return stats;
 }
 
 function printSummary(db) {
@@ -401,6 +553,21 @@ function printSummary(db) {
   console.log(`Event date range: ${firstEvent || "n/a"} to ${lastEvent || "n/a"}`);
 }
 
+function printSyncRunSummary(stats, pruneStats) {
+  console.log("Sync run counts:");
+  console.log(`  events fetched: ${stats.fetchedEvents}`);
+  console.log(`  events added: ${stats.addedEvents}`);
+  console.log(`  events updated: ${stats.updatedEvents}`);
+  console.log(`  attendance fetched: ${stats.fetchedAttendance}`);
+  console.log(`  attendance added: ${stats.addedAttendance}`);
+  console.log(`  attendance updated: ${stats.updatedAttendance}`);
+  if (pruneStats) {
+    console.log(
+      `Pruned sync logs older than ${pruneStats.cutoff}: ${pruneStats.deletedRuns} run(s), ${pruneStats.deletedRecordLogs} record log(s).`
+    );
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const db = openDb(args.dbPath);
@@ -409,35 +576,70 @@ async function main() {
   const cutoff = args.full ? "" : incrementalCutoff(db, args.days);
   const syncedAt = new Date().toISOString();
   const bigquery = new BigQuery(args.projectId ? { projectId: args.projectId } : undefined);
+  let runId;
 
   console.log(`Mode: ${args.full ? "full" : "incremental"}`);
   console.log(`SQLite DB: ${args.dbPath}`);
   console.log(`Region org ID: ${args.regionOrgId}`);
   if (!args.full) console.log(`Incremental cutoff: ${cutoff}`);
+  console.log(`Sync log retention: ${args.logRetentionDays} day(s)`);
 
-  const [events, attendance] = await Promise.all([
-    fetchEvents(bigquery, args, cutoff),
-    fetchAttendance(bigquery, args, cutoff),
-  ]);
+  const stats = {
+    fetchedEvents: 0,
+    fetchedAttendance: 0,
+    addedEvents: 0,
+    updatedEvents: 0,
+    addedAttendance: 0,
+    updatedAttendance: 0,
+  };
 
-  console.log(`Fetched events: ${events.length}`);
-  console.log(`Fetched attendance rows: ${attendance.length}`);
+  try {
+    const [events, attendance] = await Promise.all([
+      fetchEvents(bigquery, args, cutoff),
+      fetchAttendance(bigquery, args, cutoff),
+    ]);
 
-  if (args.dryRun) {
+    stats.fetchedEvents = events.length;
+    stats.fetchedAttendance = attendance.length;
+
+    console.log(`Fetched events: ${events.length}`);
+    console.log(`Fetched attendance rows: ${attendance.length}`);
+
+    if (args.dryRun) {
+      printSyncRunSummary(stats);
+      printSummary(db);
+      db.close();
+      return;
+    }
+
+    runId = startSyncRun(db, {
+      mode: args.full ? "full" : "incremental",
+      cutoff,
+      startedAt: syncedAt,
+    });
+
+    const eventStats = upsertEvents(db, events, syncedAt, runId);
+    const attendanceStats = upsertAttendance(db, attendance, syncedAt, runId);
+    stats.addedEvents = eventStats.added;
+    stats.updatedEvents = eventStats.updated;
+    stats.addedAttendance = attendanceStats.added;
+    stats.updatedAttendance = attendanceStats.updated;
+
+    setSyncState(db, "last_success_at", syncedAt);
+    setSyncState(db, "last_mode", args.full ? "full" : "incremental");
+    setSyncState(db, "last_cutoff", cutoff || "");
+    finishSyncRun(db, runId, stats);
+    const pruneStats = pruneSyncLogs(db, args.logRetentionDays);
+
+    printSyncRunSummary(stats, pruneStats);
     printSummary(db);
     db.close();
-    return;
+    console.log("Reporting database sync complete.");
+  } catch (err) {
+    if (runId) finishSyncRun(db, runId, stats, err.stack || err.message || String(err));
+    db.close();
+    throw err;
   }
-
-  upsertEvents(db, events, syncedAt);
-  upsertAttendance(db, attendance, syncedAt);
-  setSyncState(db, "last_success_at", syncedAt);
-  setSyncState(db, "last_mode", args.full ? "full" : "incremental");
-  setSyncState(db, "last_cutoff", cutoff || "");
-
-  printSummary(db);
-  db.close();
-  console.log("Reporting database sync complete.");
 }
 
 main().catch((err) => {

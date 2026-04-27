@@ -1,4 +1,32 @@
 #!/usr/bin/env bash
+# Install Google Cloud CLI on a RHEL-compatible server and optionally authenticate
+# Application Default Credentials for BigQuery access.
+#
+# Why this exists:
+# F3PO's reporting sync uses Google Application Default Credentials to read
+# BigQuery and write a local SQLite reporting database. On a personal machine,
+# `gcloud auth application-default login` is easy. On a headless RHEL server,
+# the setup steps are easy to forget, so this script records the exact package
+# repo and follow-up commands.
+#
+# This script does not store Google credentials in the repo. If you choose to
+# run the interactive auth, gcloud writes credentials under the current user's
+# home directory, usually:
+#
+#   ~/.config/gcloud/application_default_credentials.json
+#
+# Run as the same Linux user that will run the reporting sync timer.
+#
+# Common usage:
+#
+#   cd /mnt/nas/node/f3po-slack-bot
+#   ./scripts/setup-rhel-gcloud.sh
+#
+# Overrides:
+#
+#   GOOGLE_CLOUD_PROJECT=f3data ./scripts/setup-rhel-gcloud.sh
+#   F3PO_REPO_DIR=/opt/f3po-slack-bot ./scripts/setup-rhel-gcloud.sh
+
 set -euo pipefail
 
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-f3data}"
@@ -53,7 +81,7 @@ echo "  gcloud config set project $PROJECT_ID"
 echo
 echo "After auth, test from the repo:"
 echo "  cd $REPO_DIR"
-echo "  npm run backblasts:bigquery:dry-run"
+echo "  npm run reporting:sync:dry-run"
 echo
 
 read -r -p "Run interactive gcloud auth now? [y/N] " run_auth
@@ -62,8 +90,8 @@ if [[ "$run_auth" =~ ^[Yy]$ ]]; then
   gcloud config set project "$PROJECT_ID"
 
   if [[ -d "$REPO_DIR" ]]; then
-    echo "Running BigQuery dry run from $REPO_DIR..."
-    (cd "$REPO_DIR" && npm run backblasts:bigquery:dry-run)
+    echo "Running reporting sync dry run from $REPO_DIR..."
+    (cd "$REPO_DIR" && npm run reporting:sync:dry-run)
   else
     echo "Repo directory not found: $REPO_DIR"
   fi

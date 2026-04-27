@@ -22,9 +22,11 @@ chmod 600 .env
 
 Edit `.env` with the real Slack/OpenAI values before starting the service.
 
+For a more complete new-server checklist, see [Server Migration Runbook](server-migration.md).
+
 ## BigQuery Access
 
-To let the RHEL server run the BigQuery backblast exporter directly, install and authenticate the Google Cloud CLI:
+To let the RHEL server sync BigQuery data into the local SQLite reporting database, install and authenticate the Google Cloud CLI:
 
 ```sh
 cd /mnt/nas/node/f3po-slack-bot
@@ -34,7 +36,7 @@ cd /mnt/nas/node/f3po-slack-bot
 Then verify:
 
 ```sh
-npm run backblasts:bigquery:dry-run
+npm run reporting:sync:dry-run
 ```
 
 To keep the local SQLite reporting database fresh, install the daily 3 AM reporting sync timer:
@@ -49,7 +51,15 @@ Run the timer under the same user that authenticated `gcloud`. Override the serv
 F3PO_SERVICE_USER=mpotter ./scripts/install-reporting-sync-timer.sh
 ```
 
-Create `/etc/systemd/system/f3po-slack-bot.service`:
+Install the Slack bot service with:
+
+```sh
+./scripts/install-f3po-service.sh
+```
+
+The script writes `/etc/systemd/system/f3po-slack-bot.service`, reloads systemd, enables the service, and starts it.
+
+Manual equivalent:
 
 ```ini
 [Unit]

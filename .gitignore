@@ -1,7 +1,15 @@
 node_modules/
 .env
+.env.local
 .DS_Store
 npm-debug.log*
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+application_default_credentials.json
+*service-account*.json
+*credentials*.json
 logs/*
 !logs/.gitkeep
 export/

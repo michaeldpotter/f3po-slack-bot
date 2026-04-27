@@ -1,4 +1,27 @@
 #!/usr/bin/env bash
+# Install or update the systemd timer that keeps the local SQLite reporting
+# database synced from BigQuery every day at 3 AM.
+#
+# Why a timer:
+# The Slack bot should query a local SQLite database for reports instead of
+# hitting BigQuery live on every Slack request. This makes usage predictable and
+# gives us a place to enforce privacy/reporting rules.
+#
+# The timer runs:
+#
+#   npm run reporting:sync
+#
+# The systemd service must run as the same Linux user that authenticated Google
+# Application Default Credentials with:
+#
+#   gcloud auth application-default login
+#
+# By default, this script uses SUDO_USER when invoked via sudo, otherwise USER.
+# Override if needed:
+#
+#   F3PO_SERVICE_USER=mpotter ./scripts/install-reporting-sync-timer.sh
+#
+
 set -euo pipefail
 
 REPO_DIR="${F3PO_REPO_DIR:-/mnt/nas/node/f3po-slack-bot}"
