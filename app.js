@@ -68,6 +68,8 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "Do not include file citations, source markers, annotation tokens, or file-search citation markup in the final answer. " +
   "Do not answer from general knowledge in this pass. " +
   "Do not ask the user whether you should search approved websites. " +
+  "Do not offer to search, list searchable domains, or ask which site to check. " +
+  "If the file-search docs only contain a partial answer and the user likely needs official, current, registration, rules, schedule, location, or standards information, return exactly NEED_WEB_SEARCH and nothing else. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
   "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
 
@@ -76,6 +78,7 @@ const WEB_FALLBACK_INSTRUCTIONS =
   "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
   "Use web search proactively; do not ask the user for permission to search and do not ask which approved site to check. " +
   "If a specific source would be useful, search the allowed domains and use the best available result. " +
+  "Do not list the allowed domains unless the user explicitly asks what domains are enabled. " +
   "Do not include source markers, annotation tokens, or citation markup in the final answer. " +
   "If the allowed websites do not contain the answer, say so and ask one targeted question.";
 
