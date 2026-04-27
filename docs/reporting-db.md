@@ -126,6 +126,32 @@ npm run reporting:query -- attendance-by-ao-day --day saturday --days 365
 
 These report types are aggregate AO/workout statistics. They do not expose recent individual attendance, person-location patterns, or raw COT/backblast text.
 
+## Slack Reporting
+
+The bot checks messages for approved reporting requests before using vector search or web search.
+
+Currently supported Slack report shapes:
+
+- average attendance for a named AO, such as “How many PAX on average attend Flyover?”
+- attendance by AO for a weekday, such as “Show attendance for all AOs that meet Saturday over the last year”
+- FNGs by month
+- workouts by month
+- workouts by AO
+
+The Slack path uses the same local SQLite database and predefined SQL templates. It does not let the model write SQL.
+
+The bot blocks obvious recent person-attendance/location requests, such as:
+
+- “Where did Chubbs work out last week?”
+- “Was Person X at AO Y yesterday?”
+- “Who attended AO X this morning?”
+
+Blocked response:
+
+```text
+I can’t report recent individual attendance or location patterns. I can help with aggregate AO activity, FNG counts, Q counts, or longer-range non-current trends.
+```
+
 Inspect recent sync runs:
 
 ```sh

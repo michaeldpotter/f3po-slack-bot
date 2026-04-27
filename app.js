@@ -5,6 +5,7 @@ const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
+const { maybeAnswerReportingQuestion } = require("./lib/reporting");
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -703,6 +704,42 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       return;
     }
 
+    const reportingReply = maybeAnswerReportingQuestion(event.text);
+    if (reportingReply) {
+      logBlock(
+        "BOT REPORTING REPLY SENT",
+        {
+          trigger: "app_mention",
+          user: labels.user,
+          responding_to: labels.userName,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          answer_source: reportingReply.source,
+          response: reportingReply.text,
+        },
+        "debug"
+      );
+
+      await say({
+        thread_ts: threadTs,
+        text: reportingReply.text,
+      });
+      logInteraction({
+        trigger: "app_mention",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: reportingReply.source,
+        questionText: event.text,
+        responseText: reportingReply.text,
+      });
+      return;
+    }
+
     logBlock(
       "GENERATING BOT REPLY",
       {
@@ -822,6 +859,42 @@ slackApp.message(async ({ message, client, say, context }) => {
     );
 
     if (!replyDecision.shouldReply) {
+      return;
+    }
+
+    const reportingReply = maybeAnswerReportingQuestion(message.text);
+    if (reportingReply) {
+      logBlock(
+        "BOT REPORTING REPLY SENT",
+        {
+          trigger: "thread_follow_up",
+          user: labels.user,
+          responding_to: labels.userName,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          answer_source: reportingReply.source,
+          response: reportingReply.text,
+        },
+        "debug"
+      );
+
+      await say({
+        thread_ts: threadTs,
+        text: reportingReply.text,
+      });
+      logInteraction({
+        trigger: "thread_follow_up",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: reportingReply.source,
+        questionText: message.text,
+        responseText: reportingReply.text,
+      });
       return;
     }
 
