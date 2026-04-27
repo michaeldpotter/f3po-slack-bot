@@ -5,17 +5,20 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "rag:setup": "node rag_setup.js",
-    "rag:rebuild": "node rag_setup.js rebuild",
-    "rag:add": "node rag_setup.js add",
-    "youtube:export": "node youtube_export.js",
-    "test": "node --check app.js && node --check rag_setup.js && node --check youtube_export.js"
+    "rag:setup": "node scripts/rag-setup.js",
+    "rag:rebuild": "node scripts/rag-setup.js rebuild",
+    "rag:add": "node scripts/rag-setup.js add",
+    "backblasts:bigquery": "node scripts/export-backblasts-bigquery.js",
+    "backblasts:bigquery:dry-run": "node scripts/export-backblasts-bigquery.js --dry-run",
+    "youtube:export": "node scripts/export-youtube.js",
+    "test": "node --check app.js && node --check scripts/rag-setup.js && node --check scripts/export-youtube.js && node --check scripts/export-backblasts-bigquery.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
     "@slack/bolt": "^4.6.0",
     "dotenv": "^17.3.1",
     "openai": "^6.27.0"

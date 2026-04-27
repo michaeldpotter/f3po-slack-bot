@@ -4,6 +4,6 @@ node_modules/
 npm-debug.log*
 logs/*
 !logs/.gitkeep
-youtube-export/
-VectorStore/.DS_Store
-VectorStore/F3 Wichita Documents/
+export/
+vectorstore/.DS_Store
+vectorstore/F3 Wichita Documents/

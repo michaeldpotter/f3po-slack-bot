@@ -1,20 +1,21 @@
 // Export F3 Wichita YouTube channel metadata/captions and rebuild the searchable
-// VectorStore/F3 Wichita Documents/f3wichita-youtube.md index.
+// vectorstore/F3 Wichita Documents/f3wichita-youtube.md index.
 //
 // Usage:
-//   node youtube_export.js
-//   node youtube_export.js --channel https://www.youtube.com/@f3wichita/videos
-//   node youtube_export.js --skip-fetch
+//   node scripts/export-youtube.js
+//   node scripts/export-youtube.js --channel https://www.youtube.com/@f3wichita/videos
+//   node scripts/export-youtube.js --skip-fetch
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+const REPO_ROOT = path.resolve(__dirname, "..");
 const DEFAULT_CHANNEL_URL = "https://www.youtube.com/@f3wichita/videos";
-const EXPORT_DIR = path.join(__dirname, "youtube-export");
+const EXPORT_DIR = path.join(REPO_ROOT, "export", "youtube");
 const OUTPUT_DOC = path.join(
-  __dirname,
-  "VectorStore",
+  REPO_ROOT,
+  "vectorstore",
   "F3 Wichita Documents",
   "f3wichita-youtube.md"
 );

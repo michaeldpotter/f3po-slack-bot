@@ -1,12 +1,12 @@
-// rag_setup.js
+// scripts/rag-setup.js
 //
 // Usage:
-//   node rag_setup.js rebuild [docsDir] [--force]
-//   node rag_setup.js add [docsDir] [--force]
+//   node scripts/rag-setup.js rebuild [docsDir] [--force]
+//   node scripts/rag-setup.js add [docsDir] [--force]
 //
 // Defaults:
 //   mode: rebuild
-//   docsDir: VECTOR_STORE_SOURCE_DIR or ./VectorStore
+//   docsDir: VECTOR_STORE_SOURCE_DIR or ./vectorstore
 //
 // Modes:
 //   rebuild - creates a new vector store, uploads all docs, and updates VECTOR_STORE_ID in .env
@@ -21,8 +21,8 @@ const path = require("path");
 const OpenAI = require("openai");
 
 const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".docx", ".html", ".csv", ".json"]);
-const DEFAULT_DOCS_DIR = process.env.VECTOR_STORE_SOURCE_DIR || "VectorStore";
-const DEFAULT_SOURCE_ROOT = "VectorStore";
+const DEFAULT_DOCS_DIR = process.env.VECTOR_STORE_SOURCE_DIR || "vectorstore";
+const DEFAULT_SOURCE_ROOT = "vectorstore";
 const DEFAULT_ENV_PATH = ".env";
 const VECTOR_STORE_NAME_PREFIX = "F3PO Knowledge Docs";
 const VECTOR_STORE_RESTART_SERVICE =
@@ -42,20 +42,20 @@ const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 function printUsage() {
   console.log(`
 Usage:
-  node rag_setup.js rebuild [docsDir] [--force]
-  node rag_setup.js add [docsDir] [--force]
+  node scripts/rag-setup.js rebuild [docsDir] [--force]
+  node scripts/rag-setup.js add [docsDir] [--force]
 
 Examples:
-  node rag_setup.js rebuild
-  node rag_setup.js rebuild ./VectorStore
-  node rag_setup.js add ./VectorStore
-  node rag_setup.js rebuild ~/Documents/f3-docs --force
+  node scripts/rag-setup.js rebuild
+  node scripts/rag-setup.js rebuild ./vectorstore
+  node scripts/rag-setup.js add ./vectorstore
+  node scripts/rag-setup.js rebuild ~/Documents/f3-docs --force
 
 Notes:
   - rebuild creates a new vector store and writes its ID to .env.
   - add uses the current VECTOR_STORE_ID and uploads only new or changed files.
-  - docsDir defaults to VECTOR_STORE_SOURCE_DIR or ./VectorStore.
-  - docsDir must be inside ./VectorStore unless --force is passed.
+  - docsDir defaults to VECTOR_STORE_SOURCE_DIR or ./vectorstore.
+  - docsDir must be inside ./vectorstore unless --force is passed.
 `);
 }
 
@@ -77,7 +77,7 @@ function parseArgs(argv) {
     };
   }
 
-  // Backward compatible: node rag_setup.js ./docs
+  // Backward compatible: node scripts/rag-setup.js ./docs
   return {
     mode: "rebuild",
     docsDir: first || DEFAULT_DOCS_DIR,
@@ -99,7 +99,7 @@ function assertDocsDirAllowed(docsDir, force = false) {
   if (!isInsideSourceRoot) {
     throw new Error(
       `Refusing to ingest outside ${DEFAULT_SOURCE_ROOT}: ${docsDir}\n` +
-        "Move files under VectorStore or rerun with --force if you really intend to upload that path."
+        "Move files under vectorstore or rerun with --force if you really intend to upload that path."
     );
   }
 }
