@@ -558,6 +558,39 @@ function threadHasBotReply(messages, botUserId) {
   return messages.some((m) => botUserId && m.user === botUserId);
 }
 
+function isQuestionLike(text = "") {
+  const cleaned = cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    cleaned.includes("?") ||
+    /^(what|how|who|where|when|why|which|can|could|do|does|did|is|are|list|show|tell)\b/.test(
+      cleaned
+    )
+  );
+}
+
+function previousBotMessage(messages, botUserId, latestMessage) {
+  const latestTs = latestMessage?.ts || "";
+  const beforeLatest = latestTs
+    ? messages.filter((m) => !m.ts || m.ts < latestTs)
+    : messages.slice(0, -1);
+
+  return beforeLatest.reverse().find((m) => botUserId && m.user === botUserId) || null;
+}
+
+function botInvitedFollowUp(text = "") {
+  const cleaned = cleanSlackText(text).toLowerCase();
+  return (
+    /\bwhich would you like\b/.test(cleaned) ||
+    /\bif you want\b/.test(cleaned) ||
+    /\bwant me to\b/.test(cleaned) ||
+    /\bi can (also )?(show|give|help|explain|walk|pull|answer)\b/.test(cleaned)
+  );
+}
+
 function shouldUseNameInReply(name) {
   return Boolean(name && name !== "unknown" && !/^U[A-Z0-9]+$/.test(name));
 }
@@ -626,6 +659,16 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
       decision: "NO",
       reason: "Obvious acknowledgement/chatter.",
     };
+  }
+  if (isQuestionLike(text)) {
+    const previousBot = previousBotMessage(messages, botUserId, latestMessage);
+    if (previousBot && botInvitedFollowUp(previousBot.text)) {
+      return {
+        shouldReply: true,
+        decision: "YES",
+        reason: "The previous bot reply invited a follow-up and the latest message asks a question.",
+      };
+    }
   }
 
   const recentThread = threadToModelInput(messages, botUserId)
