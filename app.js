@@ -561,6 +561,25 @@ function maybeAnswerPlayfulQuestion(text = "") {
     .trim();
   const normalized = cleaned.toLowerCase();
 
+  const mentionsChubbs = /\bchubbs\b/.test(normalized);
+  const chubbsHumor =
+    /\b(funny|joke|roast|rib|smile|smiled|awesome|legend|best|worst|nerd|wizard|robot|bot|creator)\b/.test(
+      normalized
+    ) ||
+    /\b(has|is|was|why|how|what)\b.*\bchubbs\b/.test(normalized) ||
+    /\bchubbs\b.*\?/.test(normalized);
+  const chubbsFactual =
+    /\b(tech\s*q|it\s*q|contact|created you|built you|who created|who built)\b/.test(normalized);
+
+  if (mentionsChubbs && chubbsHumor && !chubbsFactual) {
+    return {
+      text:
+        "Chubbs? Elite HIM. Built F3PO, keeps the tech lights on, and somehow still finds time to make bad ideas work. " +
+        "I’m contractually obligated to say he is awesome, but inconveniently, the evidence supports it.",
+      source: "playful_reply_chubbs",
+    };
+  }
+
   const smileMatch = normalized.match(/\bhas\s+(.+?)\s+ever\s+smiled\b/);
   if (smileMatch) {
     const rawName = cleaned.match(/\bhas\s+(.+?)\s+ever\s+smiled\b/i)?.[1] || "that PAX";
