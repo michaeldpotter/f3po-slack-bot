@@ -1073,24 +1073,45 @@ slackApp.message(async ({ message, client, say, context }) => {
 
     const threadMessages = await fetchThreadMessages(client, message.channel, threadTs);
     if (!threadHasBotReply(threadMessages, context.botUserId)) {
+      const skippedReason = "Bot has not replied in this thread.";
       logBlock(
         "THREAD FOLLOW-UP SKIPPED",
         {
           user: labels.user,
           channel: labels.channel,
           thread_ts: threadTs,
-          reason: "Bot has not replied in this thread.",
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
         },
         "debug"
       );
+      logInteraction({
+        trigger: "thread_follow_up_skipped",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "thread_skipped",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        questionText: message.text,
+        responseText: skippedReason,
+      });
       return;
     }
 
-    const replyDecision = await shouldReplyToThreadMessage(
-      threadMessages,
-      context.botUserId,
-      message
-    );
+    const replyDecision =
+      toneResult.tone === "playful" && isQuestionLike(message.text)
+        ? {
+            shouldReply: true,
+            decision: "YES",
+            reason: "Playful question-like follow-up in a thread where the bot has already replied.",
+          }
+        : await shouldReplyToThreadMessage(threadMessages, context.botUserId, message);
 
     logBlock(
       "THREAD FOLLOW-UP DECISION",
@@ -1105,6 +1126,21 @@ slackApp.message(async ({ message, client, say, context }) => {
     );
 
     if (!replyDecision.shouldReply) {
+      logInteraction({
+        trigger: "thread_follow_up_skipped",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "thread_skipped",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        questionText: message.text,
+        responseText: replyDecision.reason || "Thread follow-up was not directed at the bot.",
+      });
       return;
     }
 
