@@ -574,8 +574,8 @@ function maybeAnswerPlayfulQuestion(text = "") {
   if (mentionsChubbs && chubbsHumor && !chubbsFactual) {
     return {
       text:
-        "Chubbs? Elite HIM. Built F3PO, keeps the tech lights on, and somehow still finds time to make bad ideas work. " +
-        "I’m contractually obligated to say he is awesome, but inconveniently, the evidence supports it.",
+        "Chubbs? Elite HIM 🫡. Built F3PO, keeps the tech lights on 💻, and somehow still finds time to make bad ideas work. " +
+        "I’m contractually obligated to say he is awesome, but inconveniently, the evidence supports it ⚡.",
       source: "playful_reply_chubbs",
     };
   }
@@ -586,9 +586,9 @@ function maybeAnswerPlayfulQuestion(text = "") {
     const name = rawName.trim().replace(/\s+/g, " ");
     return {
       text:
-        `I cannot confirm ${name} has ever smiled in a backblast photo. ` +
+        `I cannot confirm ${name} has ever smiled in a backblast photo 📸. ` +
         "The evidence remains suspiciously thin, which somehow feels very on-brand. " +
-        "I’ll mark it as possible, not yet proven.",
+        "I’ll mark it as possible, not yet proven 😐.",
       source: "playful_reply",
     };
   }
