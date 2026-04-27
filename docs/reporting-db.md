@@ -133,12 +133,16 @@ The bot checks messages for approved reporting requests before using vector sear
 Currently supported Slack report shapes:
 
 - average attendance for a named AO, such as “How many PAX on average attend Flyover?”
+- highest recorded attendance for a named AO, such as “What was the highest attendance ever at Wild West?”
 - attendance by AO for a weekday, such as “Show attendance for all AOs that meet Saturday over the last year”
+- a PAX’s own recent attendance, such as “Show me the last 5 workouts I was at”
 - FNGs by month
 - workouts by month
 - workouts by AO
 
 The Slack path uses the same local SQLite database and predefined SQL templates. It does not let the model write SQL.
+
+For self-attendance, the bot uses a conservative fuzzy match between the Slack display name and `attendance.f3_name`. If the match is not high-confidence or is ambiguous, it refuses instead of guessing.
 
 The bot blocks obvious recent person-attendance/location requests, such as:
 

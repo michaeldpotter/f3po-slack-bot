@@ -704,7 +704,9 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       return;
     }
 
-    const reportingReply = maybeAnswerReportingQuestion(event.text);
+    const reportingReply = maybeAnswerReportingQuestion(event.text, {
+      requesterName: labels.userName,
+    });
     if (reportingReply) {
       logBlock(
         "BOT REPORTING REPLY SENT",
@@ -862,7 +864,9 @@ slackApp.message(async ({ message, client, say, context }) => {
       return;
     }
 
-    const reportingReply = maybeAnswerReportingQuestion(message.text);
+    const reportingReply = maybeAnswerReportingQuestion(message.text, {
+      requesterName: labels.userName,
+    });
     if (reportingReply) {
       logBlock(
         "BOT REPORTING REPLY SENT",
