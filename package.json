@@ -12,9 +12,11 @@
     "reporting:sync": "node scripts/sync-reporting-db.js",
     "reporting:sync:full": "node scripts/sync-reporting-db.js --full",
     "reporting:sync:dry-run": "node scripts/sync-reporting-db.js --dry-run",
+    "reporting:query": "node scripts/query-reporting-db.js",
+    "reporting:status": "node scripts/query-reporting-db.js status",
     "interactions:search": "node scripts/search-interactions.js",
     "youtube:export": "node scripts/export-youtube.js",
-    "test": "node --check app.js && node --check scripts/rag-setup.js && node --check scripts/export-youtube.js && node --check scripts/sync-reporting-db.js && node --check scripts/search-interactions.js && bash -n scripts/*.sh"
+    "test": "node --check app.js && node --check scripts/rag-setup.js && node --check scripts/export-youtube.js && node --check scripts/sync-reporting-db.js && node --check scripts/query-reporting-db.js && node --check scripts/search-interactions.js && bash -n scripts/*.sh"
   },
   "keywords": [],
   "author": "",

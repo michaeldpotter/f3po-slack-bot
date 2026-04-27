@@ -46,6 +46,12 @@ Dry run:
 npm run reporting:sync:dry-run
 ```
 
+Status:
+
+```sh
+npm run reporting:status
+```
+
 Override the rolling lookback:
 
 ```sh
@@ -91,6 +97,22 @@ The imported attendance table contains PAX-level data. Do not expose this table 
 `sync_record_log` stores the records touched by a sync run. It logs whether each event or attendance row was added or updated, plus a small JSON detail snapshot to make review easier. This table is local operational history, not bot-facing data.
 
 The sync automatically prunes `sync_runs` and `sync_record_log` rows older than `REPORTING_SYNC_LOG_RETENTION_DAYS`. The SQLite database lives under `export/google/`, which is ignored by Git.
+
+## Approved Aggregate Reports
+
+Manual approved reports are available through `npm run reporting:query`. This is intentionally not an arbitrary SQL interface.
+
+Examples:
+
+```sh
+npm run reporting:query -- fngs-by-month --days 365
+npm run reporting:query -- workouts-by-month --days 365
+npm run reporting:query -- workouts-by-ao --days 365
+npm run reporting:query -- avg-attendance-by-ao --ao Flyover --days 365
+npm run reporting:query -- attendance-by-ao-day --day saturday --days 365
+```
+
+These report types are aggregate AO/workout statistics. They do not expose recent individual attendance, person-location patterns, or raw COT/backblast text.
 
 Inspect recent sync runs:
 
