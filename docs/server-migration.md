@@ -59,6 +59,7 @@ gcloud auth application-default login
 gcloud config set project f3data
 cd /mnt/nas/node/f3po-slack-bot
 npm run reporting:sync:dry-run
+npm run reporting:health
 ```
 
 If interactive auth on the server is awkward, copy your local ADC file from your Mac:
@@ -121,6 +122,7 @@ sudo journalctl -u f3po-reporting-sync.service -n 100 --no-pager
 ```sh
 npm run reporting:sync:dry-run
 npm run reporting:sync:full
+npm run reporting:health
 ```
 
 The local SQLite reporting database lives at:

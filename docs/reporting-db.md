@@ -52,6 +52,12 @@ Status:
 npm run reporting:status
 ```
 
+Health check:
+
+```sh
+npm run reporting:health
+```
+
 Override the rolling lookback:
 
 ```sh
@@ -78,6 +84,12 @@ Override it for one run:
 
 ```sh
 npm run reporting:sync -- --log-retention-days 180
+```
+
+The reporting health check fails when the local DB is empty, the last sync run failed, or the last successful sync is older than `REPORTING_HEALTH_MAX_AGE_HOURS`:
+
+```sh
+REPORTING_HEALTH_MAX_AGE_HOURS=36
 ```
 
 ## Tables
@@ -142,10 +154,36 @@ The timer installer is safe to rerun after a move or config change; it rewrites 
 The timer runs:
 
 ```sh
-npm run reporting:sync
+./scripts/run-reporting-sync-with-healthchecks.sh
 ```
 
 every day at 3 AM.
+
+The wrapper runs `npm run reporting:sync`, then `npm run reporting:health`.
+
+## Healthchecks.io
+
+To monitor the daily reporting sync, create a Healthchecks.io check and put its full ping URL in `.env` on the server:
+
+```sh
+HEALTHCHECKS_REPORTING_SYNC_URL=https://hc-ping.com/your-uuid
+```
+
+Healthchecks.io ping URLs are secrets. Do not commit this value.
+
+The sync wrapper sends:
+
+- `/start` before the sync begins
+- the base URL after sync and health check success
+- `/fail` if sync or health check fails
+
+Healthchecks.io documents `/start`, base success pings, and `/fail` failure pings in its Pinging API docs: <https://healthchecks.io/docs/http_api/>.
+
+After setting or changing `HEALTHCHECKS_REPORTING_SYNC_URL`, reinstall the timer so systemd uses the wrapper:
+
+```sh
+./scripts/install-reporting-sync-timer.sh
+```
 
 The installer runs the service as the current user by default, or `SUDO_USER` when launched through `sudo`. Override that user if needed:
 

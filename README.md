@@ -122,6 +122,7 @@ Sync the local SQLite reporting database:
 ```sh
 npm run reporting:sync:full
 npm run reporting:sync
+npm run reporting:health
 ```
 
 Search the local bot interaction database:

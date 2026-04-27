@@ -37,12 +37,19 @@ Then verify:
 
 ```sh
 npm run reporting:sync:dry-run
+npm run reporting:health
 ```
 
 To keep the local SQLite reporting database fresh, install the daily 3 AM reporting sync timer:
 
 ```sh
 ./scripts/install-reporting-sync-timer.sh
+```
+
+If using Healthchecks.io, put the full ping URL in `.env` before installing or reinstalling the timer:
+
+```sh
+HEALTHCHECKS_REPORTING_SYNC_URL=https://hc-ping.com/your-uuid
 ```
 
 Run the timer under the same user that authenticated `gcloud`. Override the service user if needed:

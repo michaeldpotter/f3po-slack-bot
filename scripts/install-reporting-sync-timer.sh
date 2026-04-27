@@ -9,7 +9,10 @@
 #
 # The timer runs:
 #
-#   npm run reporting:sync
+#   ./scripts/run-reporting-sync-with-healthchecks.sh
+#
+# That wrapper runs the sync, runs `npm run reporting:health`, and optionally
+# pings Healthchecks.io when HEALTHCHECKS_REPORTING_SYNC_URL is set in .env.
 #
 # The systemd service must run as the same Linux user that authenticated Google
 # Application Default Credentials with:
@@ -52,7 +55,7 @@ Type=oneshot
 User=$SERVICE_USER
 Environment=HOME=$SERVICE_HOME
 WorkingDirectory=$REPO_DIR
-ExecStart=/usr/bin/npm run reporting:sync
+ExecStart=$REPO_DIR/scripts/run-reporting-sync-with-healthchecks.sh
 EOF
 
 echo "Installing reporting sync timer..."
