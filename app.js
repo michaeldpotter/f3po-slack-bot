@@ -706,6 +706,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
 
     const reportingReply = maybeAnswerReportingQuestion(event.text, {
       requesterName: labels.userName,
+      botUserId: context.botUserId,
     });
     if (reportingReply) {
       logBlock(
@@ -866,6 +867,7 @@ slackApp.message(async ({ message, client, say, context }) => {
 
     const reportingReply = maybeAnswerReportingQuestion(message.text, {
       requesterName: labels.userName,
+      botUserId: context.botUserId,
       threadMessages,
     });
     if (reportingReply) {
