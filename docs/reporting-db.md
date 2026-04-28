@@ -126,6 +126,125 @@ npm run reporting:query -- attendance-by-ao-day --day saturday --days 365
 
 These report types are aggregate AO/workout statistics. They do not expose recent individual attendance, person-location patterns, or raw COT/backblast text.
 
+## Terminal Reporting Tester
+
+Use the terminal tester on the RHEL server when you want to check whether a Slack-style question will hit F3PO’s deterministic reporting/F3 Nation API path before the model fallback.
+
+This is deliberately narrow. If it says `No reporting reply`, that means the deterministic reporting/API path did not answer and the real Slack bot would continue to the normal model/vector-store path.
+
+For a broader terminal test that includes that fallback, use:
+
+```sh
+npm run bot:ask -- "what can you do?"
+npm run bot:ask -- --interactive
+```
+
+Install or update from the repo:
+
+```sh
+cd /mnt/nas/node/f3po-slack-bot
+git pull
+npm install
+```
+
+Make sure `.env` has the reporting DB and F3 Nation API settings:
+
+```sh
+REPORTING_DB_PATH=export/google/f3po-reporting.sqlite
+F3_NATION_API_KEY=
+F3_NATION_API_CLIENT=f3po-slack-bot
+F3_NATION_REGION_ORG_ID=36533
+```
+
+Run a direct prompt:
+
+```sh
+npm run reporting:ask -- "ww q saturday"
+npm run reporting:ask -- "who qs flyover wed"
+npm run reporting:ask -- "show me wild west q schedule next week"
+```
+
+For the fastest follow-up testing, use interactive mode. It keeps a fake Slack thread in memory, appending each prompt and F3PO response so context-dependent follow-ups can resolve naturally:
+
+```sh
+npm run reporting:ask -- --interactive
+```
+
+Example interactive session:
+
+```text
+You> ww q saturday
+
+F3PO>
+[f3nation_api]
+📅 *Wild West Q Schedule — saturday*
+
+• *2026-05-02* 6:30 AM-7:30 AM — Wild West: Q: Hammer Pants (F3 Wichita)
+
+You> rest of the month?
+
+F3PO>
+[f3nation_api]
+📅 *Wild West Q Schedule — rest of the month*
+...
+```
+
+Interactive commands:
+
+```text
+/thread   show the fake thread context currently in memory
+/clear    clear the fake thread
+/exit     quit
+```
+
+Successful reporting-path output starts with the answer source:
+
+```text
+[f3nation_api]
+📅 *Wild West Q Schedule — saturday*
+
+• *2026-05-02* 6:30 AM-7:30 AM — Wild West: Q: Hammer Pants (F3 Wichita)
+```
+
+If the script prints this, the prompt did not match an approved reporting handler and would likely fall through to the general model path in Slack:
+
+```text
+No reporting reply. This prompt would likely fall through to the model path.
+```
+
+Use JSON mode when debugging source/routing:
+
+```sh
+npm run reporting:ask -- --json "who qs flyover wed"
+```
+
+You can also test follow-up context from a saved text file. Put prior thread messages in a text file separated by blank lines:
+
+```sh
+cat >/tmp/f3po-thread.txt <<'EOF'
+who is q on sat at ww?
+
+📅 *Wild West Q Schedule — sat*
+
+• *2026-05-02* 6:30 AM-7:30 AM — Wild West: Q: Hammer Pants
+EOF
+
+npm run reporting:ask -- --thread /tmp/f3po-thread.txt "rest of the month?"
+npm run reporting:ask -- --thread /tmp/f3po-thread.txt "what about next week?"
+```
+
+You can also pipe a prompt from stdin:
+
+```sh
+printf '%s\n' "who has the q at wild west this saturday" | npm run reporting:ask -- --stdin
+```
+
+Regression checks for common Slack shorthand live in `scripts/check-reporting-intents.js` and run as part of:
+
+```sh
+npm test
+```
+
 ## Slack Reporting
 
 The bot checks messages for approved reporting requests before using vector search or web search.
@@ -143,7 +262,17 @@ Currently supported Slack report shapes:
 
 The Slack path uses the same local SQLite database and predefined SQL templates. It does not let the model write SQL.
 
-If the local reporting DB does not have future Q assignments for an upcoming workout, the bot should not offer to draft Slack messages or inspect signup threads. It should point the PAX to the F3 Nation app via `/calendar`, the #-calendar channel, or the specific AO channel.
+For upcoming Q assignments, the bot can optionally query the live F3 Nation API calendar endpoint before falling back to the local reporting DB. Configure:
+
+```sh
+F3_NATION_API_KEY=
+F3_NATION_API_CLIENT=f3po-slack-bot
+F3_NATION_REGION_ORG_ID=36533
+```
+
+Create a read-only API key at <https://map.f3nation.com/admin/api-keys>. The API requires both `Authorization: Bearer ...` and a `Client` header. The bot uses `GET /v1/event-instance` plus planned attendance from `GET /v1/attendance/event-instance/{eventInstanceId}` for upcoming schedule/Q questions and caches responses briefly with `F3_NATION_API_CACHE_TTL_MS`.
+
+If the live API is not configured or does not have a matching future event/Q assignment, and the local reporting DB also does not have future Q rows, the bot should not offer to draft Slack messages, inspect signup threads, or invent Slack channel suggestions. It should briefly say it cannot confirm the scheduled Q from the available data.
 
 For self-attendance, the bot uses a conservative fuzzy match between the Slack display name and `attendance.f3_name`. If the match is not high-confidence or is ambiguous, it refuses instead of guessing.
 

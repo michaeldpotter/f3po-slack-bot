@@ -24,6 +24,7 @@ SERVICE_USER="${F3PO_SERVICE_USER:-${SUDO_USER:-${USER}}}"
 SERVICE_NAME="${F3PO_SERVICE_NAME:-f3po-slack-bot.service}"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
 NODE_BIN="${F3PO_NODE_BIN:-$(command -v node)}"
+MEMORY_MAX="${F3PO_MEMORY_MAX:-512M}"
 
 if [[ ! "$SERVICE_NAME" =~ ^[A-Za-z0-9_.@:-]+\.service$ ]]; then
   echo "Invalid systemd service name: $SERVICE_NAME" >&2
@@ -60,15 +61,21 @@ sudo tee "$SERVICE_FILE" >/dev/null <<EOF
 Description=F3PO Slack Bot
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$REPO_DIR
+EnvironmentFile=$REPO_DIR/.env
 ExecStart=$NODE_BIN app.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+MemoryMax=$MEMORY_MAX
+TimeoutStopSec=20
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target

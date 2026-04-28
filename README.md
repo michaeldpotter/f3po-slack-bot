@@ -130,10 +130,32 @@ npm run reporting:sync
 npm run reporting:health
 ```
 
+Test whether a Slack-style reporting question will hit the deterministic reporting/API path:
+
+```sh
+npm run reporting:ask -- "ww q saturday"
+npm run reporting:ask -- --interactive
+npm run reporting:ask -- --thread /tmp/f3po-thread.txt "rest of the month?"
+```
+
+Test the broader bot path from the terminal. This tries reporting/API first, then the vector store/model path:
+
+```sh
+npm run bot:ask -- "what can you do?"
+npm run bot:ask -- --interactive
+```
+
 Search the local bot interaction database:
 
 ```sh
 npm run interactions:search -- "IronPax"
+```
+
+Check bot runtime health:
+
+```sh
+npm run health
+npm run health:deep
 ```
 
 Export the F3 Wichita YouTube index:
@@ -159,6 +181,7 @@ vectorstore/F3 Wichita Documents/ Ignored local/private source docs
 export/youtube/                Ignored YouTube metadata/caption exports
 export/google/                 Ignored Google/BigQuery scratch/review exports
 logs/                          Ignored daily runtime logs
+tmp/f3po-status.json           Ignored runtime heartbeat/status file
 ```
 
 ## More Docs

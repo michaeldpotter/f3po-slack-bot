@@ -7,6 +7,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
 const { maybeAnswerReportingQuestion } = require("./lib/reporting");
+const { readStatus, statusPath, validateStatus, writeStatus } = require("./lib/health-status");
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -48,6 +49,9 @@ const THREAD_REPLY_LIMIT_WINDOW_MS = parsePositiveInt(
   process.env.THREAD_REPLY_LIMIT_WINDOW_MS,
   60 * 1000
 );
+const STATUS_PATH = statusPath();
+const HEARTBEAT_INTERVAL_MS = parsePositiveInt(process.env.F3PO_HEARTBEAT_INTERVAL_MS, 30 * 1000);
+const STARTUP_SELF_TEST_ENABLED = process.env.F3PO_STARTUP_SELF_TEST !== "0";
 const slackUserCache = new Map();
 const slackChannelCache = new Map();
 const handledMessageCache = new Map();
@@ -55,6 +59,39 @@ const recentThreadQuestions = new Map();
 const threadReplyWindows = new Map();
 let interactionDb;
 let interactionFtsEnabled = false;
+const runtimeStatus = {
+  service: "f3po-slack-bot",
+  started_at: nowIso(),
+  updated_at: nowIso(),
+  process: {
+    pid: process.pid,
+    node: process.version,
+    platform: process.platform,
+  },
+  config: {
+    model: MODEL,
+    vector_store_id: VECTOR_STORE_ID,
+    allowed_channels_count: ALLOWED_CHANNEL_IDS.length,
+    web_search_enabled: WEB_SEARCH_ALLOWED_DOMAINS.length > 0,
+    reporting_db_path: process.env.REPORTING_DB_PATH || path.join("export", "google", "f3po-reporting.sqlite"),
+    interaction_db_path: INTERACTION_DB_PATH,
+  },
+  slack: {
+    started: false,
+    mode: "Socket Mode",
+  },
+  counters: {
+    app_mentions_received: 0,
+    thread_followups_received: 0,
+    replies_sent: 0,
+    errors: 0,
+  },
+  last_event_at: null,
+  last_reply_at: null,
+  last_error_at: null,
+  last_error: null,
+  last_fatal_error_at: null,
+};
 
 // Basic safety: keep thread context bounded
 const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
@@ -72,13 +109,17 @@ const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
   "You help F3 Wichita PAX answer questions using Slack thread context, F3 documents, and approved web sources. " +
   "Be concise, practical, and lightly dry-humored. " +
+  "Use an F3-flavored voice by default: plainspoken, brotherly, lightly witty, and comfortable with common F3 terms like PAX, Q, AO, Site Q, HIM, gloom, beatdown, mumblechatter, and coffeeteria when they naturally fit. " +
+  "Add one small F3-style turn of phrase or aside when it helps the reply feel alive, but do not force jargon into every sentence and do not let jokes bury the answer. " +
+  "For serious, sensitive, operational, or troubleshooting questions, keep the flavor restrained: useful first, color second. " +
   "Format Slack replies cleanly: short answer first, bold section headers when helpful, compact bullets or numbered lists, and light contextual emoji only when it improves scanning. " +
   "Avoid giant paragraphs; prefer 1-3 short sections with whitespace between them. " +
   "Stay on topic. Do not drift to discussing non-F3 topics. " +
   "Do not invent Slack channels, and do not tell users to post in a channel. " +
+  "For F3 Wichita leadership, roster, Site Q, AO Q, or role-holder questions, answer the specific question directly and stop once the useful fact and brief source context are given. Do not add generic confirmation/contact next steps, F3 Nation app advice, `/calendar` advice, or channel suggestions unless the user explicitly asks how to verify, contact, or update the information. " +
   "You are the bot, not a PAX and not a Q. Never say or imply that you are Qing, calling Q, leading, attending, or choosing a workout. " +
   "When offering follow-up help about leadership, say 'who is Qing', 'who is scheduled to Q', or 'who is leading' instead of 'which one I am calling Q'. " +
-  "If you cannot confirm who is scheduled to Q for an upcoming workout, do not offer to draft Slack messages or DMs, and do not offer to read a Slack signup thread. Tell them to check the F3 Nation app with `/calendar`, the #-calendar channel, or that specific AO channel. " +
+  "If you cannot confirm who is scheduled to Q for a specific upcoming workout date after using the reporting/API path and available docs, do not offer to draft Slack messages or DMs, and do not offer to read a Slack signup thread. Briefly say you cannot confirm the scheduled Q from the available data. " +
   "Detect obvious F3 ribbing, jokes, and facetious questions. If a question is playful rather than factual, answer playfully and briefly instead of treating it like a research assignment. " +
   "For playful questions about a PAX, keep it harmless and avoid mean personal claims, private facts, or pretending to have inspected photos unless the thread itself includes the photo. " +
   "Do not ask users to paste, upload, or link backblasts, Slack threads, photos, or other source material for you to inspect. You can use the current Slack thread text, the local reporting DB, vector-store docs, and approved web search only. " +
@@ -99,6 +140,7 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "Do not answer from general knowledge in this pass. " +
   "Do not ask the user whether you should search approved websites. " +
   "Do not offer to search, list searchable domains, or ask which site to check. " +
+  "For answered F3 Wichita leadership, roster, Site Q, AO Q, or role-holder questions, do not add generic confirmation/contact next steps, F3 Nation app advice, `/calendar` advice, or channel suggestions unless the user explicitly asks for that. " +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
   "If the file-search docs only contain a partial answer and the user likely needs official, current, registration, rules, schedule, location, or standards information, return exactly NEED_WEB_SEARCH and nothing else. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
@@ -338,6 +380,126 @@ function logBlock(title, fields = {}, level = "info") {
   if (level === "error") console.error(text);
   else console.log(text);
   writeLogText(text);
+}
+
+function updateStatus(patch = {}) {
+  Object.assign(runtimeStatus, patch, { updated_at: nowIso() });
+  try {
+    writeStatus(runtimeStatus, STATUS_PATH);
+  } catch (err) {
+    console.error(`[${nowIso()}] ERROR writing status file:`, err.message || err);
+  }
+}
+
+function recordEvent(kind) {
+  runtimeStatus.last_event_at = nowIso();
+  if (kind === "app_mention") runtimeStatus.counters.app_mentions_received += 1;
+  if (kind === "thread_follow_up") runtimeStatus.counters.thread_followups_received += 1;
+  updateStatus();
+}
+
+function recordReply() {
+  runtimeStatus.last_reply_at = nowIso();
+  runtimeStatus.counters.replies_sent += 1;
+  updateStatus();
+}
+
+function recordError(err, { fatal = false } = {}) {
+  runtimeStatus.counters.errors += 1;
+  runtimeStatus.last_error_at = nowIso();
+  runtimeStatus.last_error = {
+    message: err?.message || String(err),
+    name: err?.name || "Error",
+  };
+  if (fatal) runtimeStatus.last_fatal_error_at = nowIso();
+  updateStatus();
+}
+
+function formatHealthSummary(status) {
+  const checks = validateStatus(status);
+  const lines = [
+    checks.every((check) => check.ok) ? "*F3PO health:* OK" : "*F3PO health:* needs attention",
+    `• Started: ${status.started_at || "unknown"}`,
+    `• Last event: ${status.last_event_at || "none"}`,
+    `• Last reply: ${status.last_reply_at || "none"}`,
+    `• Vector store: ${status.config?.vector_store_id || "unknown"}`,
+    `• Model: ${status.config?.model || "unknown"}`,
+    `• Replies sent: ${status.counters?.replies_sent ?? 0}`,
+  ];
+
+  if (status.last_error_at) {
+    lines.push(`• Last error: ${status.last_error_at} — ${status.last_error?.message || "unknown"}`);
+  }
+
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length > 0) {
+    lines.push("", "*Failed checks:*");
+    failed.forEach((check) => lines.push(`• ${check.name}: ${check.detail}`));
+  }
+
+  return lines.join("\n");
+}
+
+function capabilityReply() {
+  return [
+    "Hey, I'm F3PO: F3 Wichita's answer bot with just enough attitude to keep the paperwork awake.",
+    "",
+    "I can:",
+    "- Find leadership, roster, Site Q, AO Q, and role-holder info.",
+    "- Pull answers from uploaded docs instead of vibes and campfire memory.",
+    "- Check Q schedules through reporting/F3 Nation API data.",
+    "- Search approved F3 sites when that is enabled.",
+    "- Help debug bot/reporting weirdness when the machines start acting too confident.",
+    "",
+    "Ask me something specific and I'll go dig. Ask me something vague and I'll still try, but I reserve the right to sigh digitally.",
+  ].join("\n");
+}
+
+function maybeAnswerAdminCommand(text = "") {
+  const cleaned = cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .trim()
+    .toLowerCase();
+
+  if (/^(what can you do|help|commands|what do you do)\??$/.test(cleaned)) {
+    return capabilityReply();
+  }
+
+  if (!/^(status|health|config|vectorstore|vector store|last error)\b/.test(cleaned)) {
+    return null;
+  }
+
+  if (/^(status|health)\b/.test(cleaned)) {
+    try {
+      return formatHealthSummary(readStatus(STATUS_PATH));
+    } catch {
+      return formatHealthSummary(runtimeStatus);
+    }
+  }
+
+  if (/^config\b/.test(cleaned)) {
+    return [
+      "*F3PO config*",
+      `• Model: ${MODEL}`,
+      `• Vector store: ${VECTOR_STORE_ID}`,
+      `• Allowed channels: ${ALLOWED_CHANNEL_IDS.length || "any channel the bot can access"}`,
+      `• Web search: ${WEB_SEARCH_ALLOWED_DOMAINS.length > 0 ? WEB_SEARCH_ALLOWED_DOMAINS.join(", ") : "disabled"}`,
+      `• Reporting DB: ${runtimeStatus.config.reporting_db_path}`,
+      `• Status file: ${STATUS_PATH}`,
+    ].join("\n");
+  }
+
+  if (/^vector\s*store\b|^vectorstore\b/.test(cleaned)) {
+    return `*Vector store:* ${VECTOR_STORE_ID}`;
+  }
+
+  if (/^last error\b/.test(cleaned)) {
+    return runtimeStatus.last_error_at
+      ? `*Last error:* ${runtimeStatus.last_error_at}\n${runtimeStatus.last_error?.message || "unknown"}`
+      : "*Last error:* none since this process started.";
+  }
+
+  return null;
 }
 
 function openInteractionDb() {
@@ -1009,6 +1171,44 @@ async function replyWithError(say, threadTs) {
     thread_ts: threadTs,
     text: "Sorry—something went wrong generating a reply.",
   });
+  recordReply();
+}
+
+async function startupSelfTest() {
+  const checks = [];
+  const addCheck = (name, ok, detail = "") => checks.push({ name, ok, detail });
+
+  addCheck("vector_store_id", Boolean(VECTOR_STORE_ID), VECTOR_STORE_ID || "missing");
+  addCheck("slack_tokens", Boolean(process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN));
+  addCheck("openai_api_key", Boolean(process.env.OPENAI_API_KEY));
+
+  try {
+    fs.mkdirSync(path.dirname(STATUS_PATH), { recursive: true });
+    addCheck("status_path_writable", true, STATUS_PATH);
+  } catch (err) {
+    addCheck("status_path_writable", false, err.message || String(err));
+  }
+
+  try {
+    const store = await openai.vectorStores.retrieve(VECTOR_STORE_ID);
+    addCheck("openai_vector_store", Boolean(store?.id), `${store?.id || "missing"} ${store?.status || ""}`.trim());
+  } catch (err) {
+    addCheck("openai_vector_store", false, err.message || String(err));
+  }
+
+  runtimeStatus.startup_checks = checks;
+  updateStatus();
+
+  const failed = checks.filter((check) => !check.ok);
+  logBlock(
+    failed.length === 0 ? "STARTUP SELF-TEST PASSED" : "STARTUP SELF-TEST FAILED",
+    Object.fromEntries(checks.map((check) => [check.name, `${check.ok ? "OK" : "FAIL"} ${check.detail || ""}`])),
+    failed.length === 0 ? "info" : "error"
+  );
+
+  if (failed.length > 0) {
+    throw new Error(`Startup self-test failed: ${failed.map((check) => check.name).join(", ")}`);
+  }
 }
 
 slackApp.event("app_mention", async ({ event, client, say, context }) => {
@@ -1052,6 +1252,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       },
       "debug"
     );
+    recordEvent("app_mention");
 
     // 1) Restrict to configured channels.
     if (!isChannelAllowed(event.channel)) {
@@ -1074,6 +1275,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         thread_ts: threadTs,
         text: nudge,
       });
+      recordReply();
       logInteraction({
         trigger: "app_mention_blocked",
         channelId: event.channel,
@@ -1089,6 +1291,32 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         elapsedMs: elapsedMsSince(requestStartedAt),
         questionText: event.text,
         responseText: nudge,
+      });
+      return;
+    }
+
+    const adminReply = maybeAnswerAdminCommand(event.text);
+    if (adminReply) {
+      await say({
+        thread_ts: threadTs,
+        text: adminReply,
+      });
+      recordReply();
+      logInteraction({
+        trigger: "app_mention",
+        channelId: event.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: event.ts,
+        answerSource: "admin_status",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: event.text,
+        responseText: adminReply,
       });
       return;
     }
@@ -1186,6 +1414,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         thread_ts: threadTs,
         text: playfulReply.text,
       });
+      recordReply();
       logInteraction({
         trigger: "app_mention",
         channelId: event.channel,
@@ -1205,9 +1434,10 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       return;
     }
 
-    const reportingReply = maybeAnswerReportingQuestion(event.text, {
+    const reportingReply = await maybeAnswerReportingQuestion(event.text, {
       requesterName: labels.userName,
       botUserId: context.botUserId,
+      log: (message, err) => logLine(`${message}:`, err?.message || String(err), "error"),
     });
     if (reportingReply) {
       logBlock(
@@ -1231,6 +1461,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
         thread_ts: threadTs,
         text: reportingReply.text,
       });
+      recordReply();
       logInteraction({
         trigger: "app_mention",
         channelId: event.channel,
@@ -1302,6 +1533,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       thread_ts: threadTs,
       text: reply.text,
     });
+    recordReply();
     logInteraction({
       trigger: "app_mention",
       channelId: event.channel,
@@ -1319,6 +1551,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       responseText: reply.text,
     });
   } catch (err) {
+    recordError(err);
     logLine("ERROR handling app_mention:", err.stack || err.message || String(err), "error");
     await replyWithError(say, threadTs);
   }
@@ -1368,6 +1601,33 @@ slackApp.message(async ({ message, client, say, context }) => {
       },
       "debug"
     );
+    recordEvent("thread_follow_up");
+
+    const adminReply = maybeAnswerAdminCommand(message.text);
+    if (adminReply) {
+      await say({
+        thread_ts: threadTs,
+        text: adminReply,
+      });
+      recordReply();
+      logInteraction({
+        trigger: "thread_follow_up",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "admin_status",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: message.text,
+        responseText: adminReply,
+      });
+      return;
+    }
 
     const threadMessages = await fetchThreadMessages(client, message.channel, threadTs);
     if (!threadHasBotReply(threadMessages, context.botUserId)) {
@@ -1542,6 +1802,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         thread_ts: threadTs,
         text: playfulReply.text,
       });
+      recordReply();
       logInteraction({
         trigger: "thread_follow_up",
         channelId: message.channel,
@@ -1561,10 +1822,11 @@ slackApp.message(async ({ message, client, say, context }) => {
       return;
     }
 
-    const reportingReply = maybeAnswerReportingQuestion(message.text, {
+    const reportingReply = await maybeAnswerReportingQuestion(message.text, {
       requesterName: labels.userName,
       botUserId: context.botUserId,
       threadMessages,
+      log: (logMessage, err) => logLine(`${logMessage}:`, err?.message || String(err), "error"),
     });
     if (reportingReply) {
       logBlock(
@@ -1588,6 +1850,7 @@ slackApp.message(async ({ message, client, say, context }) => {
         thread_ts: threadTs,
         text: reportingReply.text,
       });
+      recordReply();
       logInteraction({
         trigger: "thread_follow_up",
         channelId: message.channel,
@@ -1659,6 +1922,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       thread_ts: threadTs,
       text: reply.text,
     });
+    recordReply();
     logInteraction({
       trigger: "thread_follow_up",
       channelId: message.channel,
@@ -1676,6 +1940,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       responseText: reply.text,
     });
   } catch (err) {
+    recordError(err);
     logLine("ERROR handling message:", err.stack || err.message || String(err), "error");
     if (threadTs) await replyWithError(say, threadTs);
   }
@@ -1684,10 +1949,18 @@ slackApp.message(async ({ message, client, say, context }) => {
 (async () => {
   cleanupOldLogs();
   initInteractionDb();
+  updateStatus();
   setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000).unref();
   setInterval(pruneInteractionLogs, 24 * 60 * 60 * 1000).unref();
+  setInterval(() => updateStatus(), HEARTBEAT_INTERVAL_MS).unref();
+
+  if (STARTUP_SELF_TEST_ENABLED) {
+    await startupSelfTest();
+  }
 
   await slackApp.start();
+  runtimeStatus.slack.started = true;
+  updateStatus();
   logBlock("SLACK BOT RUNNING", {
     mode: "Socket Mode",
     model: MODEL,
@@ -1701,5 +1974,21 @@ slackApp.message(async ({ message, client, say, context }) => {
     interaction_retention_days: Number.isFinite(INTERACTION_RETENTION_DAYS)
       ? INTERACTION_RETENTION_DAYS
       : 90,
+    status_path: STATUS_PATH,
+    heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+    startup_self_test: STARTUP_SELF_TEST_ENABLED ? "enabled" : "disabled",
   });
 })();
+
+process.on("uncaughtException", (err) => {
+  recordError(err, { fatal: true });
+  logLine("FATAL uncaughtException:", err.stack || err.message || String(err), "error");
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  recordError(err, { fatal: true });
+  logLine("FATAL unhandledRejection:", err.stack || err.message || String(err), "error");
+  process.exit(1);
+});

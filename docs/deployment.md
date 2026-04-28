@@ -65,6 +65,7 @@ Install the Slack bot service with:
 ```
 
 The script writes `/etc/systemd/system/f3po-slack-bot.service`, reloads systemd, enables the service, and starts it.
+The service is configured to restart automatically, use `.env` as an `EnvironmentFile`, and cap memory usage with `MemoryMax`.
 
 Manual equivalent:
 
@@ -73,15 +74,21 @@ Manual equivalent:
 Description=F3PO Slack Bot
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
 User=mpotter
 WorkingDirectory=/mnt/nas/node/f3po-slack-bot
+EnvironmentFile=/mnt/nas/node/f3po-slack-bot/.env
 ExecStart=/usr/bin/node app.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+MemoryMax=512M
+TimeoutStopSec=20
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target
@@ -107,6 +114,48 @@ Watch app logs:
 
 ```sh
 tail -f /mnt/nas/node/f3po-slack-bot/logs/f3po-$(date +%F).log
+```
+
+## Health Monitoring
+
+The bot writes a heartbeat/status file while it is running. The default path is:
+
+```sh
+tmp/f3po-status.json
+```
+
+Run a local health check from the RHEL server:
+
+```sh
+cd /mnt/nas/node/f3po-slack-bot
+npm run health
+npm run health -- --json
+npm run health:deep
+```
+
+The normal health check validates the heartbeat age, required env vars, and readable SQLite files. The deep check also verifies the OpenAI vector store and F3 Nation API when configured.
+
+Install the every-minute health timer:
+
+```sh
+./scripts/install-f3po-health-timer.sh
+```
+
+Optional Healthchecks.io bot monitoring:
+
+```sh
+HEALTHCHECKS_F3PO_BOT_URL=https://hc-ping.com/your-check-id
+```
+
+The wrapper pings the base URL on success and `/fail` when `npm run health` fails.
+
+You can also ask the bot in Slack:
+
+```text
+@F3PO status
+@F3PO config
+@F3PO vectorstore
+@F3PO last error
 ```
 
 Search bot question/response history:

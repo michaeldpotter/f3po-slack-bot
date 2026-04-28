@@ -12,6 +12,7 @@ application_default_credentials.json
 *credentials*.json
 logs/*
 !logs/.gitkeep
+tmp/
 export/
 vectorstore/.DS_Store
 vectorstore/F3 Wichita Documents/
