@@ -8,6 +8,7 @@ The repo contains scripts that make the server setup repeatable. They deliberate
 
 - npm dependencies from `package-lock.json`
 - F3PO Slack bot systemd service
+- F3PO bot health check systemd timer
 - optional Google Cloud CLI for BigQuery access
 - optional 3 AM reporting sync systemd timer
 - optional local Google Application Default Credentials copy
@@ -26,6 +27,7 @@ chmod 600 .env
 ```
 
 Edit `.env` with real Slack/OpenAI/vector store values before installing services.
+If using Healthchecks.io for bot uptime, set `HEALTHCHECKS_F3PO_BOT_URL` in `.env` before installing the health timer.
 
 Then run:
 
@@ -40,6 +42,12 @@ That script:
 3. Optionally installs Google Cloud CLI.
 4. Installs/starts `f3po-slack-bot.service`.
 5. Optionally installs the 3 AM reporting sync timer.
+
+Install the bot health timer after setup:
+
+```sh
+./scripts/install-f3po-health-timer.sh
+```
 
 ## BigQuery Credentials
 
@@ -96,6 +104,12 @@ Install the Slack bot service:
 ./scripts/install-f3po-service.sh
 ```
 
+Install the every-minute bot health timer:
+
+```sh
+./scripts/install-f3po-health-timer.sh
+```
+
 Install the 3 AM reporting sync timer:
 
 ```sh
@@ -112,14 +126,18 @@ Copy local ADC credentials to a server:
 
 ```sh
 systemctl status f3po-slack-bot.service --no-pager
+systemctl list-timers f3po-bot-health.timer --no-pager
 systemctl list-timers f3po-reporting-sync.timer --no-pager
 sudo journalctl -u f3po-slack-bot.service -n 100 --no-pager
+sudo journalctl -u f3po-bot-health.service -n 100 --no-pager
 sudo journalctl -u f3po-reporting-sync.service -n 100 --no-pager
 ```
 
 ## Data Checks
 
 ```sh
+npm run health
+npm run health:deep
 npm run reporting:sync:dry-run
 npm run reporting:sync:full
 npm run reporting:health
