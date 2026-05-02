@@ -11,6 +11,7 @@ const fs = require("fs");
 const readline = require("readline");
 const OpenAI = require("openai");
 const { maybeAnswerReportingQuestion } = require("../lib/reporting");
+const { loadBotTuning, replyStyleInstruction } = require("../lib/bot-tuning");
 
 const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 
@@ -19,11 +20,12 @@ const VECTOR_STORE_ID = requireEnv("VECTOR_STORE_ID");
 const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
   process.env.WEB_SEARCH_ALLOWED_DOMAINS
 );
+const REPLY_STYLE = loadBotTuning().replyStyle;
 
 const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
   "You help F3 Wichita PAX answer questions using F3 documents, reporting/API data, and approved web sources. " +
-  "Be concise, practical, and lightly dry-humored. " +
+  replyStyleInstruction(REPLY_STYLE) +
   "Use an F3-flavored voice by default: plainspoken, brotherly, lightly witty, and comfortable with common F3 terms like PAX, Q, AO, Site Q, HIM, gloom, beatdown, mumblechatter, and coffeeteria when they naturally fit. " +
   "Add one small F3-style turn of phrase or aside when it helps the reply feel alive, but do not force jargon into every sentence and do not let jokes bury the answer. " +
   "For serious, sensitive, operational, or troubleshooting questions, keep the flavor restrained: useful first, color second. " +

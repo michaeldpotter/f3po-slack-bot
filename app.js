@@ -8,6 +8,13 @@ const { App } = require("@slack/bolt");
 const OpenAI = require("openai");
 const { maybeAnswerReportingQuestion } = require("./lib/reporting");
 const { readStatus, statusPath, validateStatus, writeStatus } = require("./lib/health-status");
+const {
+  didBotInviteFollowUp,
+  isObviousChatterText,
+  loadBotTuning,
+  replyStyleInstruction,
+  threadReplyClassifierInstructions,
+} = require("./lib/bot-tuning");
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -42,13 +49,15 @@ const INTERACTION_RETENTION_DAYS = Number.parseInt(
   process.env.INTERACTION_RETENTION_DAYS || "90",
   10
 );
-const MESSAGE_DEDUPE_TTL_MS = parsePositiveInt(process.env.MESSAGE_DEDUPE_TTL_MS, 5 * 60 * 1000);
-const QUESTION_DEDUPE_TTL_MS = parsePositiveInt(process.env.QUESTION_DEDUPE_TTL_MS, 2 * 60 * 1000);
-const THREAD_REPLY_LIMIT = parsePositiveInt(process.env.THREAD_REPLY_LIMIT, 4);
-const THREAD_REPLY_LIMIT_WINDOW_MS = parsePositiveInt(
-  process.env.THREAD_REPLY_LIMIT_WINDOW_MS,
-  60 * 1000
-);
+const BOT_TUNING = loadBotTuning();
+const REPLY_STYLE = BOT_TUNING.replyStyle;
+const THREAD_FOLLOW_UP_MODE = BOT_TUNING.threadFollowUpMode;
+const MESSAGE_DEDUPE_TTL_MS = BOT_TUNING.messageDedupeTtlMs;
+const QUESTION_DEDUPE_TTL_MS = BOT_TUNING.questionDedupeTtlMs;
+const THREAD_REPLY_LIMIT = BOT_TUNING.threadReplyLimit;
+const THREAD_REPLY_LIMIT_WINDOW_MS = BOT_TUNING.threadReplyLimitWindowMs;
+const MAX_THREAD_MESSAGES = BOT_TUNING.maxThreadMessages;
+const MAX_CHARS_PER_MESSAGE = BOT_TUNING.maxCharsPerMessage;
 const STATUS_PATH = statusPath();
 const HEARTBEAT_INTERVAL_MS = parsePositiveInt(process.env.F3PO_HEARTBEAT_INTERVAL_MS, 30 * 1000);
 const STARTUP_SELF_TEST_ENABLED = process.env.F3PO_STARTUP_SELF_TEST !== "0";
@@ -75,6 +84,11 @@ const runtimeStatus = {
     web_search_enabled: WEB_SEARCH_ALLOWED_DOMAINS.length > 0,
     reporting_db_path: process.env.REPORTING_DB_PATH || path.join("export", "google", "f3po-reporting.sqlite"),
     interaction_db_path: INTERACTION_DB_PATH,
+    reply_style: REPLY_STYLE,
+    thread_follow_up_mode: THREAD_FOLLOW_UP_MODE,
+    thread_reply_limit: THREAD_REPLY_LIMIT,
+    thread_reply_limit_window_ms: THREAD_REPLY_LIMIT_WINDOW_MS,
+    max_thread_messages: MAX_THREAD_MESSAGES,
   },
   slack: {
     started: false,
@@ -93,10 +107,6 @@ const runtimeStatus = {
   last_fatal_error_at: null,
 };
 
-// Basic safety: keep thread context bounded
-const MAX_THREAD_MESSAGES = 20; // newest 20 messages in the thread
-const MAX_CHARS_PER_MESSAGE = 2000;
-
 const CHANNEL_BLOCKED_REPLIES = [
   "👀 Bold move, PAX. I’m not enabled to answer in this channel.",
   "🫡 Respectfully: wrong AO for F3PO. I’m not enabled to answer here.",
@@ -108,7 +118,7 @@ const CHANNEL_BLOCKED_REPLIES = [
 const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
   "You help F3 Wichita PAX answer questions using Slack thread context, F3 documents, and approved web sources. " +
-  "Be concise, practical, and lightly dry-humored. " +
+  replyStyleInstruction(REPLY_STYLE) +
   "Use an F3-flavored voice by default: plainspoken, brotherly, lightly witty, and comfortable with common F3 terms like PAX, Q, AO, Site Q, HIM, gloom, beatdown, mumblechatter, and coffeeteria when they naturally fit. " +
   "Add one small F3-style turn of phrase or aside when it helps the reply feel alive, but do not force jargon into every sentence and do not let jokes bury the answer. " +
   "For serious, sensitive, operational, or troubleshooting questions, keep the flavor restrained: useful first, color second. " +
@@ -484,6 +494,8 @@ function maybeAnswerAdminCommand(text = "") {
       `• Vector store: ${VECTOR_STORE_ID}`,
       `• Allowed channels: ${ALLOWED_CHANNEL_IDS.length || "any channel the bot can access"}`,
       `• Web search: ${WEB_SEARCH_ALLOWED_DOMAINS.length > 0 ? WEB_SEARCH_ALLOWED_DOMAINS.join(", ") : "disabled"}`,
+      `• Reply style: ${REPLY_STYLE}`,
+      `• Thread follow-up mode: ${THREAD_FOLLOW_UP_MODE}`,
       `• Reporting DB: ${runtimeStatus.config.reporting_db_path}`,
       `• Status file: ${STATUS_PATH}`,
     ].join("\n");
@@ -864,21 +876,7 @@ function isObviousChatter(text = "") {
     .trim()
     .toLowerCase();
 
-  return [
-    "thanks",
-    "thank you",
-    "thx",
-    "ty",
-    "got it",
-    "ok",
-    "okay",
-    "cool",
-    "nice",
-    "perfect",
-    "awesome",
-    "sounds good",
-    "makes sense",
-  ].includes(cleaned);
+  return isObviousChatterText(cleaned);
 }
 
 function classifyMessageTone(text = "") {
@@ -1024,12 +1022,7 @@ function previousBotMessage(messages, botUserId, latestMessage) {
 
 function botInvitedFollowUp(text = "") {
   const cleaned = cleanSlackText(text).toLowerCase();
-  return (
-    /\bwhich would you like\b/.test(cleaned) ||
-    /\bif you want\b/.test(cleaned) ||
-    /\bwant me to\b/.test(cleaned) ||
-    /\bi can (also )?(show|give|help|explain|walk|pull|answer)\b/.test(cleaned)
-  );
+  return didBotInviteFollowUp(cleaned);
 }
 
 function shouldUseNameInReply(name) {
@@ -1144,11 +1137,7 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
 
   const resp = await openai.responses.create({
     model: MODEL,
-    instructions:
-      "Decide whether the assistant should reply to the latest Slack thread message. " +
-      "Reply YES only when the latest human message is directed at the assistant, asks for clarification of the assistant's prior answer, or clearly continues the bot-help request. " +
-      "Reply NO for thanks, acknowledgements, side chatter, or human-to-human discussion. " +
-      "Return YES or NO, followed by a short reason.",
+    instructions: threadReplyClassifierInstructions(),
     input:
       `Thread transcript:\n${recentThread}\n\n` +
       `Latest message:\n${cleanSlackText(text)}`,
@@ -1603,6 +1592,41 @@ slackApp.message(async ({ message, client, say, context }) => {
     );
     recordEvent("thread_follow_up");
 
+    if (THREAD_FOLLOW_UP_MODE === "off") {
+      const skippedReason = "Unmentioned thread follow-ups are disabled.";
+      logBlock(
+        "THREAD FOLLOW-UP SKIPPED",
+        {
+          user: labels.user,
+          channel: labels.channel,
+          thread_ts: threadTs,
+          message_ts: message.ts,
+          reason: skippedReason,
+          tone: toneResult.tone,
+          tone_reason: toneResult.reason,
+          elapsed_ms: elapsedMsSince(requestStartedAt).toFixed(1),
+        },
+        "debug"
+      );
+      logInteraction({
+        trigger: "thread_follow_up_skipped",
+        channelId: message.channel,
+        channelLabel: labels.channel,
+        userId: labels.userId,
+        userName: labels.userName,
+        userLabel: labels.user,
+        threadTs,
+        messageTs: message.ts,
+        answerSource: "thread_follow_up_disabled",
+        questionTone: toneResult.tone,
+        questionToneReason: toneResult.reason,
+        elapsedMs: elapsedMsSince(requestStartedAt),
+        questionText: message.text,
+        responseText: skippedReason,
+      });
+      return;
+    }
+
     const adminReply = maybeAnswerAdminCommand(message.text);
     if (adminReply) {
       await say({
@@ -1665,11 +1689,11 @@ slackApp.message(async ({ message, client, say, context }) => {
     }
 
     const replyDecision =
-      toneResult.tone === "playful" && isQuestionLike(message.text)
+      THREAD_FOLLOW_UP_MODE === "eager" && toneResult.tone === "playful" && isQuestionLike(message.text)
         ? {
             shouldReply: true,
             decision: "YES",
-            reason: "Playful question-like follow-up in a thread where the bot has already replied.",
+            reason: "Eager mode allows playful question-like follow-ups in a thread where the bot has already replied.",
             elapsedMs: 0,
           }
         : await shouldReplyToThreadMessage(threadMessages, context.botUserId, message);

@@ -21,7 +21,7 @@
     "health:deep": "node scripts/healthcheck.js --deep",
     "interactions:search": "node scripts/search-interactions.js",
     "youtube:export": "node scripts/export-youtube.js",
-    "test": "node --check app.js && node --check lib/reporting.js && node --check lib/f3nation-api.js && node --check lib/health-status.js && node --check scripts/rag-setup.js && node --check scripts/export-youtube.js && node --check scripts/sync-reporting-db.js && node --check scripts/query-reporting-db.js && node --check scripts/search-interactions.js && node --check scripts/ask-reporting.js && node --check scripts/ask-bot.js && node --check scripts/healthcheck.js && node scripts/check-reporting-intents.js && bash -n scripts/*.sh"
+    "test": "node --check app.js && node --check lib/reporting.js && node --check lib/f3nation-api.js && node --check lib/health-status.js && node --check lib/bot-tuning.js && node --check scripts/rag-setup.js && node --check scripts/export-youtube.js && node --check scripts/sync-reporting-db.js && node --check scripts/query-reporting-db.js && node --check scripts/search-interactions.js && node --check scripts/ask-reporting.js && node --check scripts/ask-bot.js && node --check scripts/healthcheck.js && node scripts/check-reporting-intents.js && bash -n scripts/*.sh"
   },
   "keywords": [],
   "author": "",

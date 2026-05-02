@@ -70,6 +70,10 @@ MESSAGE_DEDUPE_TTL_MS=300000
 QUESTION_DEDUPE_TTL_MS=120000
 THREAD_REPLY_LIMIT=4
 THREAD_REPLY_LIMIT_WINDOW_MS=60000
+F3PO_REPLY_STYLE=brief
+F3PO_THREAD_FOLLOW_UP_MODE=conservative
+F3PO_MAX_THREAD_MESSAGES=20
+F3PO_MAX_CHARS_PER_MESSAGE=2000
 ```
 
 Key env notes:
@@ -82,6 +86,11 @@ Key env notes:
 - `LOG_LEVEL` can be `error`, `info`, or `debug`.
 - `INTERACTION_DB_PATH` stores searchable bot questions/responses in local SQLite.
 - `MESSAGE_DEDUPE_TTL_MS`, `QUESTION_DEDUPE_TTL_MS`, `THREAD_REPLY_LIMIT`, and `THREAD_REPLY_LIMIT_WINDOW_MS` are runtime guardrails that prevent duplicate Slack event handling and runaway thread replies.
+- `F3PO_REPLY_STYLE` tunes answer length. Use `brief`, `normal`, or `detailed`. The default is `brief`.
+- `F3PO_THREAD_FOLLOW_UP_MODE` controls whether the bot answers unmentioned replies in threads where it has already spoken. Use `off`, `conservative`, or `eager`. The default is `conservative`.
+- `F3PO_MAX_THREAD_MESSAGES` and `F3PO_MAX_CHARS_PER_MESSAGE` bound how much Slack thread context is included in model prompts.
+
+The human-facing behavior knobs are collected and commented in `lib/bot-tuning.js`.
 
 `node_modules/`, `.env`, `export/`, daily logs, and private Wichita vectorstore docs are ignored by Git.
 
@@ -202,6 +211,8 @@ If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, i
 F3PO should not invent Slack channel names. If it cannot answer an F3 Wichita tech or IT question, it should use the vector store docs to identify the current Tech Q / IT Q and suggest contacting that person.
 
 After the bot has replied in a thread, it can answer follow-up messages in that same thread without another mention. For public channels, Slack must send the `message.channels` event. For private channels, Slack must send the `message.groups` event.
+
+Unmentioned thread follow-ups are tunable with `F3PO_THREAD_FOLLOW_UP_MODE`. `off` requires users to mention the bot again. `conservative` uses guardrails and a classifier to reply only when the latest message is directed at the bot or clearly continues the bot-help request. `eager` also allows playful question-like follow-ups after the bot has joined a thread.
 
 To control cost and avoid reply loops, F3PO ignores bot-authored messages, deduplicates repeated Slack event deliveries by channel/message timestamp, suppresses very similar questions repeated in the same thread for a short cooldown, and caps how many times it will answer in one thread during a rolling window.
 
