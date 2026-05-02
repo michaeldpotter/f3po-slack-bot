@@ -3,7 +3,7 @@
 
 const assert = require("node:assert/strict");
 const { DatabaseSync } = require("node:sqlite");
-const { classifyReportRequest } = require("../lib/reporting");
+const { classifyReportRequest, runReport } = require("../lib/reporting");
 
 const db = new DatabaseSync(":memory:");
 db.exec(`
@@ -11,7 +11,10 @@ CREATE TABLE events (
   id INTEGER PRIMARY KEY,
   ao_name TEXT,
   ao_org_id INTEGER,
-  start_date TEXT
+  start_date TEXT,
+  start_time TEXT,
+  name TEXT,
+  pax_count INTEGER
 );
 CREATE TABLE attendance (
   id INTEGER PRIMARY KEY,
@@ -20,11 +23,13 @@ CREATE TABLE attendance (
   q_ind INTEGER,
   coq_ind INTEGER
 );
-INSERT INTO events (id, ao_name, ao_org_id, start_date) VALUES
-  (1, 'Wild West', 43950, '2026-05-02'),
-  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02'),
-  (3, 'Flyover', 45713, '2026-05-02'),
-  (4, 'Depot', 45209, '2026-05-02');
+INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, name, pax_count) VALUES
+  (1, 'Wild West', 43950, '2026-05-02', '0630', 'Saturday Beatdown', 12),
+  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02', '0630', 'Saturday Beatdown', 8),
+  (3, 'Flyover', 45713, '2026-05-02', '0530', 'Morning Flight', 9),
+  (4, 'Depot', 45209, '2026-05-02', '0700', 'Depot Beatdown', 7);
+INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
+  (1, 1, 'Chubbs', 0, 0);
 `);
 
 const scheduleCases = [
@@ -70,6 +75,44 @@ assert.equal(typoAoFollowup.range.label, "upcoming week");
 const leaderboard = classifyReportRequest("who qd the most at wild west last month", db, {});
 assert.equal(leaderboard?.type, "q_leaderboard_by_ao");
 assert.equal(leaderboard.range.label, "last month");
+
+const realDate = Date;
+class FixedDate extends Date {
+  constructor(...args) {
+    super(...(args.length > 0 ? args : ["2026-05-02T12:00:00.000Z"]));
+  }
+
+  static now() {
+    return new realDate("2026-05-02T12:00:00.000Z").getTime();
+  }
+}
+FixedDate.UTC = realDate.UTC;
+FixedDate.parse = realDate.parse;
+global.Date = FixedDate;
+try {
+  const selfWeekdays = classifyReportRequest(
+    "Can you show me where I was the last four Saturdays?",
+    db,
+    {}
+  );
+  assert.equal(selfWeekdays?.type, "self_recent_weekday_attendance");
+  assert.equal(selfWeekdays.weekday.label, "saturday");
+  assert.deepEqual(selfWeekdays.dates, ["2026-05-02", "2026-04-25", "2026-04-18", "2026-04-11"]);
+
+  const selfReport = runReport(db, selfWeekdays, { requesterName: "Chubbs" });
+  assert.equal(selfReport.source, "reporting_db_self");
+  assert.match(selfReport.text, /Chubbs's Most Recent 4 Saturdays/);
+  assert.match(selfReport.text, /Wild West: Saturday Beatdown/);
+
+  const namedSelfWeekdays = classifyReportRequest(
+    "Yes, show me where Chubbs was the most recent four Saturdays",
+    db,
+    { requesterName: "Chubbs" }
+  );
+  assert.equal(namedSelfWeekdays?.type, "self_recent_weekday_attendance");
+} finally {
+  global.Date = realDate;
+}
 
 db.close();
 console.log("reporting intent checks passed");
