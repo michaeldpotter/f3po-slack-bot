@@ -2,11 +2,13 @@
 // deterministic reporting/API handlers before the model gets a chance to guess.
 
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
-const { classifyReportRequest, runReport } = require("../lib/reporting");
+const { classifyReportRequest, maybeAnswerReportingQuestion, runReport } = require("../lib/reporting");
 
-const db = new DatabaseSync(":memory:");
-db.exec(`
+const REPORTING_FIXTURE_SQL = `
 CREATE TABLE events (
   id INTEGER PRIMARY KEY,
   ao_name TEXT,
@@ -30,7 +32,11 @@ INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, name, pax_co
   (4, 'Depot', 45209, '2026-05-02', '0700', 'Depot Beatdown', 7);
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0);
-`);
+`;
+
+async function main() {
+const db = new DatabaseSync(":memory:");
+db.exec(REPORTING_FIXTURE_SQL);
 
 const scheduleCases = [
   ["who is q on sat at ww?", "Wild West", "saturday"],
@@ -110,9 +116,29 @@ try {
     { requesterName: "Chubbs" }
   );
   assert.equal(namedSelfWeekdays?.type, "self_recent_weekday_attendance");
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
+  const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
+  const fileDb = new DatabaseSync(tmpDbPath);
+  fileDb.exec(REPORTING_FIXTURE_SQL);
+  fileDb.close();
+
+  const localDbReport = await maybeAnswerReportingQuestion(
+    "Can you show me where I was the last four Saturdays?",
+    { dbPath: tmpDbPath, requesterName: "Chubbs" }
+  );
+  assert.equal(localDbReport.source, "reporting_db_self");
+  assert.match(localDbReport.text, /Wild West: Saturday Beatdown/);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 } finally {
   global.Date = realDate;
 }
 
 db.close();
 console.log("reporting intent checks passed");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
