@@ -245,6 +245,14 @@ Regression checks for common Slack shorthand live in `scripts/check-reporting-in
 npm test
 ```
 
+The schedule regression set covers common PAX phrasing, including:
+
+- broad region schedules: “Show me the schedule for next week”, “What workouts are on the calendar for the next 14 days?”, “Show me all workouts tomorrow”, “What is the schedule next weekend?”
+- AO schedule questions: “Show me Flyover schedule next week”, “When is Flyover this week?”, “What time is Depot tomorrow?”, “Is there a workout at Depot today?”
+- Q questions: “Who is Q on Sat at WW?”, “Who has the Q at Wild West this Saturday?”, “Who Qs Flyover Wed?”
+- region schedule follow-ups: “Can you show me that with Qs?”, “Can you show me for the next 14 days?”, “Just Saturday”, “Only this weekend”
+- AO filter follow-ups after a region schedule: “Show me just for Flyover”, “What about Flyover?”, “How about Depot?”
+
 ## Slack Reporting
 
 The bot checks messages for approved reporting requests before using vector search or web search.

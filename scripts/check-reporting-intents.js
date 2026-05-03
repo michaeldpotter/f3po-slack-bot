@@ -61,6 +61,10 @@ const scheduleCases = [
   ["show me wild west q schedule next week", "Wild West", "next week"],
   ["who qs flyover wed", "Flyover", "wednesday"],
   ["show q calendar for ww", "Wild West", "upcoming week"],
+  ["show me flyover schedule next week", "Flyover", "next week"],
+  ["when is flyover this week", "Flyover", "this week"],
+  ["what time is depot tomorrow", "Depot", "tomorrow"],
+  ["is there a workout at depot today", "Depot", "today"],
 ];
 
 for (const [text, ao, label] of scheduleCases) {
@@ -135,6 +139,21 @@ try {
   assert.equal(regionSchedule.range.start, "2026-05-04");
   assert.equal(regionSchedule.range.end, "2026-05-10");
 
+  const regionScheduleCases = [
+    ["what workouts are on the calendar for the next 14 days?", "next 14 days", "2026-05-02", "2026-05-16"],
+    ["show me all workouts tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me the F3 Wichita calendar this weekend", "this weekend", "2026-05-02", "2026-05-03"],
+    ["what is the schedule next weekend?", "next weekend", "2026-05-09", "2026-05-10"],
+  ];
+
+  for (const [text, label, start, end] of regionScheduleCases) {
+    const intent = classifyReportRequest(text, db, {});
+    assert.equal(intent?.type, "scheduled_workouts_by_region", text);
+    assert.equal(intent.range.label, label, text);
+    assert.equal(intent.range.start, start, text);
+    assert.equal(intent.range.end, end, text);
+  }
+
   const regionScheduleReport = runReport(db, regionSchedule, {});
   assert.equal(regionScheduleReport.source, "reporting_db_region");
   assert.match(regionScheduleReport.text, /F3 Wichita Schedule — next week/);
@@ -188,6 +207,32 @@ try {
   assert.equal(regionScheduleAoFilterFollowup?.type, "scheduled_q_by_ao");
   assert.equal(regionScheduleAoFilterFollowup.ao, "Flyover");
   assert.equal(regionScheduleAoFilterFollowup.range.label, "next 14 days");
+
+  const regionScheduleFollowupContext = {
+    threadMessages: [
+      { text: "Can you show me the next 14 days?" },
+      {
+        text:
+          "📅 *F3 Wichita Schedule — next 14 days*\n\n" +
+          "• *2026-05-04* 5:30 AM-6:30 AM — Wild West: Q: Grease Monkey\n" +
+          "• *2026-05-06* 5:30 AM-6:30 AM — Flyover: Q: not marked in the F3 Nation calendar\n" +
+          "• *2026-05-06* 5:00 AM-6:00 AM — Depot: Q: not marked in the F3 Nation calendar",
+      },
+    ],
+  };
+  const regionScheduleRangeFilterFollowups = [
+    ["just Saturday", "scheduled_workouts_by_region", "", "saturday"],
+    ["only this weekend", "scheduled_workouts_by_region", "", "this weekend"],
+    ["what about Flyover", "scheduled_q_by_ao", "Flyover", "next 14 days"],
+    ["how about depot", "scheduled_q_by_ao", "Depot", "next 14 days"],
+  ];
+
+  for (const [text, type, ao, label] of regionScheduleRangeFilterFollowups) {
+    const intent = classifyReportRequest(text, db, regionScheduleFollowupContext);
+    assert.equal(intent?.type, type, text);
+    if (ao) assert.equal(intent.ao, ao, text);
+    assert.equal(intent.range.label, label, text);
+  }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
   const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
