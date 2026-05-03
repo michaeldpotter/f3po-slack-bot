@@ -48,7 +48,9 @@ INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0),
   (2, 5, 'Hammer Pants', 1, 0),
   (3, 6, 'Dr Pepper Shake', 1, 0),
-  (4, 1, 'Hammer Pants', 1, 0);
+  (4, 1, 'Hammer Pants', 1, 0),
+  (5, 4, 'Chubbs', 1, 0),
+  (6, 6, 'Chubbs', 0, 1);
 `;
 
 async function main() {
@@ -163,6 +165,31 @@ try {
     { requesterName: "Chubbs" }
   );
   assert.equal(namedSelfWeekdays?.type, "self_recent_weekday_attendance");
+
+  const firstSelfQ = classifyReportRequest("show me the first beatdown I Qed", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(firstSelfQ?.type, "self_q_events");
+  assert.equal(firstSelfQ.order, "asc");
+  assert.equal(firstSelfQ.limit, 1);
+  const firstSelfQReport = runReport(db, firstSelfQ, { requesterName: "Chubbs" });
+  assert.equal(firstSelfQReport.source, "reporting_db_self");
+  assert.match(firstSelfQReport.text, /Chubbs's First Q/);
+  assert.match(firstSelfQReport.text, /Depot: Depot Beatdown/);
+
+  const selfQCount = classifyReportRequest("how many times have I Qed?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfQCount?.type, "self_q_count");
+  const selfQCountReport = runReport(db, selfQCount, { requesterName: "Chubbs" });
+  assert.match(selfQCountReport.text, /Q: \*1\*/);
+  assert.match(selfQCountReport.text, /Co-Q: \*1\*/);
+
+  const selfFirstPost = classifyReportRequest("what was my first workout?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstPost?.type, "self_post_events");
+  assert.equal(selfFirstPost.order, "asc");
 
   const regionSchedule = classifyReportRequest("Show me the schedule for next week", db, {});
   assert.equal(regionSchedule?.type, "scheduled_workouts_by_region");
