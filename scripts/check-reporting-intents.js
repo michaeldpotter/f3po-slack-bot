@@ -212,6 +212,27 @@ try {
   assert.match(eventRosterReport.text, /Chubbs \(Q\)/);
   assert.match(eventRosterReport.text, /Dr Pepper Shake/);
 
+  const eventRosterPronounFollowup = classifyReportRequest("Who was with him?", db, {
+    threadMessages: [
+      {
+        text: "",
+        reportingContext: {
+          type: "pax_post_events",
+          order: "asc",
+          limit: 1,
+          label: "First Post",
+          event: {
+            startDate: "2026-05-02",
+            ao: "Depot",
+            name: "Depot Beatdown",
+          },
+        },
+      },
+    ],
+  });
+  assert.equal(eventRosterPronounFollowup?.type, "event_roster_followup");
+  assert.equal(eventRosterPronounFollowup.event.ao, "Depot");
+
   const selfQCount = classifyReportRequest("how many times have I Qed?", db, {
     requesterName: "Chubbs",
   });
