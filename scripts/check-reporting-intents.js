@@ -259,6 +259,20 @@ assert.equal(namedPaxQHistory.limit, 10);
 const likelyReportingFallback = classifyReportRequest("How many beatdowns have Hammer Pants and Chubbs been to together?", db, {});
 assert.equal(likelyReportingFallback?.type, "unsupported_reporting_stats");
 
+const namedPaxFirstRuck = classifyReportRequest("when was chubbs first ruck?", db, {});
+assert.equal(namedPaxFirstRuck?.type, "pax_post_events");
+assert.equal(namedPaxFirstRuck.paxName, "Chubbs");
+assert.equal(namedPaxFirstRuck.workoutKind, "ruck");
+const namedPaxFirstRuckReport = runReport(db, namedPaxFirstRuck, {});
+assert.equal(namedPaxFirstRuckReport.source, "reporting_db_pax");
+assert.match(namedPaxFirstRuckReport.text, /Chubbs's First Ruck/);
+assert.match(namedPaxFirstRuckReport.text, /2026-05-06/);
+
+const namedPaxFirstBeatdown = classifyReportRequest("when was chubbs first beatdown?", db, {});
+assert.equal(namedPaxFirstBeatdown?.type, "pax_post_events");
+assert.equal(namedPaxFirstBeatdown.paxName, "Chubbs");
+assert.equal(namedPaxFirstBeatdown.label, "First Post");
+
 const qSourceDocsQuestion = classifyReportRequest("Did Mariachi ever take Q Source?", db, {});
 assert.equal(qSourceDocsQuestion, null);
 
