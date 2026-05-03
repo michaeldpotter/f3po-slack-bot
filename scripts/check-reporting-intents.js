@@ -210,10 +210,20 @@ try {
   assert.match(namedPaxFirstQReport.text, /Hammer Pants's First Q/);
   assert.match(namedPaxFirstQReport.text, /Wild West: Saturday Beatdown/);
 
-  const namedPaxQCount = classifyReportRequest("How many times has Hammer Pants Qed?", db, {});
-  assert.equal(namedPaxQCount?.type, "pax_q_count");
+const namedPaxQCount = classifyReportRequest("How many times has Hammer Pants Qed?", db, {});
+assert.equal(namedPaxQCount?.type, "pax_q_count");
 
-  const regionSchedule = classifyReportRequest("Show me the schedule for next week", db, {});
+const namedPaxQHistory = classifyReportRequest("Show Hammer Pants Q history", db, {});
+assert.equal(namedPaxQHistory?.type, "pax_q_events");
+assert.equal(namedPaxQHistory.limit, 10);
+
+const likelyReportingFallback = classifyReportRequest("How many beatdowns have Hammer Pants and Chubbs been to together?", db, {});
+assert.equal(likelyReportingFallback?.type, "unsupported_reporting_stats");
+
+const qSourceDocsQuestion = classifyReportRequest("Did Mariachi ever take Q Source?", db, {});
+assert.equal(qSourceDocsQuestion, null);
+
+const regionSchedule = classifyReportRequest("Show me the schedule for next week", db, {});
   assert.equal(regionSchedule?.type, "scheduled_workouts_by_region");
   assert.equal(regionSchedule.range.label, "next week");
   assert.equal(regionSchedule.range.start, "2026-05-04");
