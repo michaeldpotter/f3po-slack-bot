@@ -52,7 +52,9 @@ INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (4, 1, 'Hammer Pants', 1, 0),
   (5, 4, 'Chubbs', 1, 0),
   (6, 6, 'Chubbs', 0, 1),
-  (7, 7, 'Chubbs', 0, 0);
+  (7, 7, 'Chubbs', 0, 0),
+  (8, 4, 'Dr Pepper Shake', 0, 0),
+  (9, 4, 'Mariachi', 0, 0);
 `;
 
 async function main() {
@@ -198,6 +200,17 @@ try {
   assert.equal(eventQReport.source, "reporting_db_followup");
   assert.match(eventQReport.text, /Event Q/);
   assert.match(eventQReport.text, /\*Q:\* Chubbs/);
+
+  const eventRosterFollowup = classifyReportRequest("Who was there?", db, {
+    threadMessages: [{ text: firstSelfQReport.text }],
+  });
+  assert.equal(eventRosterFollowup?.type, "event_roster_followup");
+  assert.equal(eventRosterFollowup.event.ao, "Depot");
+  const eventRosterReport = runReport(db, eventRosterFollowup, {});
+  assert.equal(eventRosterReport.source, "reporting_db_followup");
+  assert.match(eventRosterReport.text, /Event Roster/);
+  assert.match(eventRosterReport.text, /Chubbs \(Q\)/);
+  assert.match(eventRosterReport.text, /Dr Pepper Shake/);
 
   const selfQCount = classifyReportRequest("how many times have I Qed?", db, {
     requesterName: "Chubbs",
