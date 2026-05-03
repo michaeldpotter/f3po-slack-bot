@@ -201,6 +201,18 @@ try {
   assert.equal(selfFirstPost?.type, "self_post_events");
   assert.equal(selfFirstPost.order, "asc");
 
+  const namedPaxFirstQ = classifyReportRequest("When was Hammer Pants first Q?", db, {});
+  assert.equal(namedPaxFirstQ?.type, "pax_q_events");
+  assert.equal(namedPaxFirstQ.paxName, "Hammer Pants");
+  assert.equal(namedPaxFirstQ.order, "asc");
+  const namedPaxFirstQReport = runReport(db, namedPaxFirstQ, {});
+  assert.equal(namedPaxFirstQReport.source, "reporting_db_pax");
+  assert.match(namedPaxFirstQReport.text, /Hammer Pants's First Q/);
+  assert.match(namedPaxFirstQReport.text, /Wild West: Saturday Beatdown/);
+
+  const namedPaxQCount = classifyReportRequest("How many times has Hammer Pants Qed?", db, {});
+  assert.equal(namedPaxQCount?.type, "pax_q_count");
+
   const regionSchedule = classifyReportRequest("Show me the schedule for next week", db, {});
   assert.equal(regionSchedule?.type, "scheduled_workouts_by_region");
   assert.equal(regionSchedule.range.label, "next week");
