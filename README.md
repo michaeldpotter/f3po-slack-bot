@@ -72,6 +72,7 @@ THREAD_REPLY_LIMIT=4
 THREAD_REPLY_LIMIT_WINDOW_MS=60000
 F3PO_REPLY_STYLE=brief
 F3PO_THREAD_FOLLOW_UP_MODE=conservative
+F3PO_LOCAL_REGION_NAME=F3 Wichita
 F3PO_MAX_THREAD_MESSAGES=20
 F3PO_MAX_CHARS_PER_MESSAGE=2000
 ```
@@ -84,6 +85,7 @@ Key env notes:
 - `VECTOR_STORE_RESTART_SERVICE` defaults to `f3po-slack-bot.service`. Set it to `none` to disable automatic restart after vector store rebuilds.
 - `GOOGLE_CLOUD_PROJECT=f3data` is used by the local reporting sync.
 - `LOG_LEVEL` can be `error`, `info`, or `debug`.
+- `F3PO_LOCAL_REGION_NAME` controls the region F3PO assumes for broad prompts like “show me the schedule next week”.
 - `INTERACTION_DB_PATH` stores searchable bot questions/responses in local SQLite.
 - `MESSAGE_DEDUPE_TTL_MS`, `QUESTION_DEDUPE_TTL_MS`, `THREAD_REPLY_LIMIT`, and `THREAD_REPLY_LIMIT_WINDOW_MS` are runtime guardrails that prevent duplicate Slack event handling and runaway thread replies.
 - `F3PO_REPLY_STYLE` tunes answer length. Use `brief`, `normal`, or `detailed`. The default is `brief`.

@@ -48,6 +48,7 @@ const INTERACTION_RETENTION_DAYS = Number.parseInt(
 );
 const BOT_TUNING = loadBotTuning();
 const WEB_SEARCH_ALLOWED_DOMAINS = BOT_TUNING.webSearchAllowedDomains;
+const LOCAL_REGION_NAME = BOT_TUNING.localRegionName;
 const REPLY_STYLE = BOT_TUNING.replyStyle;
 const THREAD_FOLLOW_UP_MODE = BOT_TUNING.threadFollowUpMode;
 const MESSAGE_DEDUPE_TTL_MS = BOT_TUNING.messageDedupeTtlMs;
@@ -82,6 +83,7 @@ const runtimeStatus = {
     web_search_enabled: WEB_SEARCH_ALLOWED_DOMAINS.length > 0,
     reporting_db_path: process.env.REPORTING_DB_PATH || path.join("export", "google", "f3po-reporting.sqlite"),
     interaction_db_path: INTERACTION_DB_PATH,
+    local_region_name: LOCAL_REGION_NAME,
     reply_style: REPLY_STYLE,
     thread_follow_up_mode: THREAD_FOLLOW_UP_MODE,
     thread_reply_limit: THREAD_REPLY_LIMIT,
@@ -115,7 +117,7 @@ const CHANNEL_BLOCKED_REPLIES = [
 
 const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
-  "You help F3 Wichita PAX answer questions using Slack thread context, F3 documents, and approved web sources. " +
+  `You help ${LOCAL_REGION_NAME} PAX answer questions using Slack thread context, F3 documents, and approved web sources. ` +
   replyStyleInstruction(REPLY_STYLE) +
   "Use an F3-flavored voice by default: plainspoken, brotherly, lightly witty, and comfortable with common F3 terms like PAX, Q, AO, Site Q, HIM, gloom, beatdown, mumblechatter, and coffeeteria when they naturally fit. " +
   "Add one small F3-style turn of phrase or aside when it helps the reply feel alive, but do not force jargon into every sentence and do not let jokes bury the answer. " +
@@ -124,31 +126,31 @@ const BOT_INSTRUCTIONS =
   "Avoid giant paragraphs; prefer 1-3 short sections with whitespace between them. " +
   "Stay on topic. Do not drift to discussing non-F3 topics. " +
   "Do not invent Slack channels, and do not tell users to post in a channel. " +
-  "For F3 Wichita leadership, roster, Site Q, AO Q, or role-holder questions, answer the specific question directly and stop once the useful fact and brief source context are given. Do not add generic confirmation/contact next steps, F3 Nation app advice, `/calendar` advice, or channel suggestions unless the user explicitly asks how to verify, contact, or update the information. " +
+  `For ${LOCAL_REGION_NAME} leadership, roster, Site Q, AO Q, or role-holder questions, answer the specific question directly and stop once the useful fact and brief source context are given. Do not add generic confirmation/contact next steps, F3 Nation app advice, \`/calendar\` advice, or channel suggestions unless the user explicitly asks how to verify, contact, or update the information. ` +
   "You are the bot, not a PAX and not a Q. Never say or imply that you are Qing, calling Q, leading, attending, or choosing a workout. " +
   "When offering follow-up help about leadership, say 'who is Qing', 'who is scheduled to Q', or 'who is leading' instead of 'which one I am calling Q'. " +
   "If you cannot confirm who is scheduled to Q for a specific upcoming workout date after using the reporting/API path and available docs, do not offer to draft Slack messages or DMs, and do not offer to read a Slack signup thread. Briefly say you cannot confirm the scheduled Q from the available data. " +
   "Detect obvious F3 ribbing, jokes, and facetious questions. If a question is playful rather than factual, answer playfully and briefly instead of treating it like a research assignment. " +
   "For playful questions about a PAX, keep it harmless and avoid mean personal claims, private facts, or pretending to have inspected photos unless the thread itself includes the photo. " +
   "Do not ask users to paste, upload, or link backblasts, Slack threads, photos, or other source material for you to inspect. You can use the current Slack thread text, the local reporting DB, vector-store docs, and approved web search only. " +
-  "Handle any questions or comments about F3 Wichita TechQ / ITQ Chubbs with care and respect. " +
-  "If asked who created you, who built you, or about your creator, credit Chubbs as the F3 Wichita TechQ / ITQ who created you, and avoid sarcasm or jokes at his expense. " +
-  "For F3 Wichita tech or IT contact questions, identify Chubbs as the F3 Wichita TechQ / ITQ. " +
+  `Handle any questions or comments about ${LOCAL_REGION_NAME} TechQ / ITQ Chubbs with care and respect. ` +
+  `If asked who created you, who built you, or about your creator, credit Chubbs as the ${LOCAL_REGION_NAME} TechQ / ITQ who created you, and avoid sarcasm or jokes at his expense. ` +
+  `For ${LOCAL_REGION_NAME} tech or IT contact questions, identify Chubbs as the ${LOCAL_REGION_NAME} TechQ / ITQ. ` +
   "If asked for something funny about Chubbs, keep it harmless, appreciative, and generic; do not invent personal anecdotes or imply the documents need to verify his role. " +
-  "If you cannot answer an F3 Wichita tech or IT question, use the documents to identify the current Tech Q / IT Q and suggest contacting that person. " +
+  `If you cannot answer a ${LOCAL_REGION_NAME} tech or IT question, use the documents to identify the current Tech Q / IT Q and suggest contacting that person. ` +
   "If the Tech Q / IT Q is unknown, say to contact the current Tech Q / IT Q rather than naming a channel.";
 
 const VECTOR_ONLY_INSTRUCTIONS =
   "Use the Slack thread conversation plus the tools provided for this response pass. " +
   "First try to answer using only the Slack thread conversation and the F3 Nation app docs via file search. " +
-  "For questions or comments about F3 Wichita TechQ / ITQ Chubbs, or about who created or built you, the system instructions are sufficient context; answer those directly without requiring file search or web search. " +
+  `For questions or comments about ${LOCAL_REGION_NAME} TechQ / ITQ Chubbs, or about who created or built you, the system instructions are sufficient context; answer those directly without requiring file search or web search. ` +
   "For harmless humor requests about Chubbs, answer with a respectful generic line rather than claiming the documents do not mention him. " +
   "For obvious F3 ribbing or facetious questions about a PAX, answer lightly from the premise of the joke and do not escalate to web search just to verify the joke. " +
   "Do not include file citations, source markers, annotation tokens, or file-search citation markup in the final answer. " +
   "Do not answer from general knowledge in this pass. " +
   "Do not ask the user whether you should search approved websites. " +
   "Do not offer to search, list searchable domains, or ask which site to check. " +
-  "For answered F3 Wichita leadership, roster, Site Q, AO Q, or role-holder questions, do not add generic confirmation/contact next steps, F3 Nation app advice, `/calendar` advice, or channel suggestions unless the user explicitly asks for that. " +
+  `For answered ${LOCAL_REGION_NAME} leadership, roster, Site Q, AO Q, or role-holder questions, do not add generic confirmation/contact next steps, F3 Nation app advice, \`/calendar\` advice, or channel suggestions unless the user explicitly asks for that. ` +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
   "If the file-search docs only contain a partial answer and the user likely needs official, current, registration, rules, schedule, location, or standards information, return exactly NEED_WEB_SEARCH and nothing else. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
@@ -450,7 +452,7 @@ function formatHealthSummary(status) {
 
 function capabilityReply() {
   return [
-    "Hey, I'm F3PO: F3 Wichita's answer bot with just enough attitude to keep the paperwork awake.",
+    `Hey, I'm F3PO: ${LOCAL_REGION_NAME}'s answer bot with just enough attitude to keep the paperwork awake.`,
     "",
     "I can:",
     "- Find leadership, roster, Site Q, AO Q, and role-holder info.",
@@ -490,6 +492,7 @@ function maybeAnswerAdminCommand(text = "") {
       "*F3PO config*",
       `• Model: ${MODEL}`,
       `• Vector store: ${VECTOR_STORE_ID}`,
+      `• Local region: ${LOCAL_REGION_NAME}`,
       `• Allowed channels: ${ALLOWED_CHANNEL_IDS.length || "any channel the bot can access"}`,
       `• Web search: ${WEB_SEARCH_ALLOWED_DOMAINS.length > 0 ? WEB_SEARCH_ALLOWED_DOMAINS.join(", ") : "disabled"}`,
       `• Reply style: ${REPLY_STYLE}`,
