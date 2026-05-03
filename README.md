@@ -59,7 +59,6 @@ OPENAI_MODEL=gpt-5-mini
 VECTOR_STORE_ID=vs_...
 VECTOR_STORE_SOURCE_DIR=vectorstore
 VECTOR_STORE_RESTART_SERVICE=f3po-slack-bot.service
-WEB_SEARCH_ALLOWED_DOMAINS=f3nation.com,f3wichita.com
 GOOGLE_CLOUD_PROJECT=f3data
 LOG_DIR=logs
 LOG_RETENTION_DAYS=7
@@ -80,7 +79,7 @@ F3PO_MAX_CHARS_PER_MESSAGE=2000
 Key env notes:
 
 - `SLACK_ALLOWED_CHANNEL_IDS` is optional. Leave it blank to let the bot answer in any channel it has access to.
-- `WEB_SEARCH_ALLOWED_DOMAINS` is optional. Use comma-separated bare domains like `f3nation.com`; do not include `https://`. If unset, the bot uses the defaults in `lib/bot-tuning.js`.
+- Web search domains are controlled in `lib/bot-tuning.js` so stale `.env` values cannot widen browsing unexpectedly.
 - `VECTOR_STORE_SOURCE_DIR` defaults to `vectorstore`.
 - `VECTOR_STORE_RESTART_SERVICE` defaults to `f3po-slack-bot.service`. Set it to `none` to disable automatic restart after vector store rebuilds.
 - `GOOGLE_CLOUD_PROJECT=f3data` is used by the local reporting sync.
@@ -206,7 +205,7 @@ tmp/f3po-status.json           Ignored runtime heartbeat/status file
 
 ## Behavior Notes
 
-The bot reads the current Slack thread, searches the vector store first, and replies in-thread. If the thread plus vector store do not contain enough information, it can fall back to OpenAI web search over the approved domains configured by `WEB_SEARCH_ALLOWED_DOMAINS` / `lib/bot-tuning.js`.
+The bot reads the current Slack thread, searches the vector store first, and replies in-thread. If the thread plus vector store do not contain enough information, it can fall back to OpenAI web search over the approved domains configured in `lib/bot-tuning.js`.
 
 If `SLACK_ALLOWED_CHANNEL_IDS` is set and the bot is mentioned somewhere else, it replies that it is not enabled in that channel.
 
