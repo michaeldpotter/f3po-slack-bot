@@ -133,6 +133,18 @@ try {
   assert.match(regionScheduleReport.text, /Wild West: Monday Beatdown; Q: Hammer Pants/);
   assert.match(regionScheduleReport.text, /Flyover: Wednesday Flight/);
 
+  const regionScheduleQFollowup = classifyReportRequest("Can you show me that with Qs?", db, {
+    threadMessages: [
+      { text: "show me the schedule for next week" },
+      {
+        text:
+          "Got it — next week: Mon May 4 → Sun May 10, 2026. Here are the published AO times.",
+      },
+    ],
+  });
+  assert.equal(regionScheduleQFollowup?.type, "scheduled_workouts_by_region");
+  assert.equal(regionScheduleQFollowup.range.label, "next week");
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
   const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
   const fileDb = new DatabaseSync(tmpDbPath);
