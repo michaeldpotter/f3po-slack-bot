@@ -8,6 +8,13 @@ const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
 const { classifyReportRequest, maybeAnswerReportingQuestion, runReport } = require("../lib/reporting");
 
+const manyEvents = Array.from({ length: 65 }, (_, index) => {
+  const id = 100 + index;
+  const day = String((index % 14) + 3).padStart(2, "0");
+  const hour = String(5 + (index % 3)).padStart(2, "0");
+  return `(${id}, 'AO ${index + 1}', ${50000 + index}, '2026-05-${day}', '${hour}30', '${hour}45', 'Extra Beatdown ${index + 1}', 5)`;
+}).join(",\n  ");
+
 const REPORTING_FIXTURE_SQL = `
 CREATE TABLE events (
   id INTEGER PRIMARY KEY,
@@ -32,7 +39,8 @@ INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, na
   (3, 'Flyover', 45713, '2026-05-02', '0530', '0615', 'Morning Flight', 9),
   (4, 'Depot', 45209, '2026-05-02', '0700', '0800', 'Depot Beatdown', 7),
   (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 10),
-  (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 11);
+  (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 11),
+  ${manyEvents};
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0),
   (2, 5, 'Hammer Pants', 1, 0);
@@ -132,6 +140,7 @@ try {
   assert.match(regionScheduleReport.text, /F3 Wichita Schedule — next week/);
   assert.match(regionScheduleReport.text, /Wild West: Monday Beatdown; Q: Hammer Pants/);
   assert.match(regionScheduleReport.text, /Flyover: Wednesday Flight/);
+  assert.doesNotMatch(regionScheduleReport.text, /Showing 30 of/);
 
   const regionScheduleQFollowup = classifyReportRequest("Can you show me that with Qs?", db, {
     threadMessages: [
