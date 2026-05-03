@@ -97,6 +97,24 @@ function jsonString(value) {
   return JSON.stringify(value);
 }
 
+function parseJsonMaybe(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function arrayFromMeta(meta, key) {
+  const parsed = parseJsonMaybe(meta);
+  const value = parsed?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim());
+}
+
 function openDb(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
@@ -143,6 +161,11 @@ CREATE TABLE IF NOT EXISTS events (
   convergence_ind INTEGER,
   all_types_json TEXT,
   all_tags_json TEXT,
+  preblast TEXT,
+  backblast TEXT,
+  event_meta_json TEXT,
+  image_urls_json TEXT,
+  file_ids_json TEXT,
   created TEXT,
   updated TEXT,
   synced_at TEXT NOT NULL
@@ -211,6 +234,18 @@ CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON sync_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_sync_record_log_run ON sync_record_log(run_id);
 CREATE INDEX IF NOT EXISTS idx_sync_record_log_logged ON sync_record_log(logged_at);
 `);
+
+  ensureColumn(db, "events", "preblast", "TEXT");
+  ensureColumn(db, "events", "backblast", "TEXT");
+  ensureColumn(db, "events", "event_meta_json", "TEXT");
+  ensureColumn(db, "events", "image_urls_json", "TEXT");
+  ensureColumn(db, "events", "file_ids_json", "TEXT");
+}
+
+function ensureColumn(db, table, column, type) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
+  if (columns.includes(column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 function getSyncState(db, key) {
@@ -290,7 +325,7 @@ SELECT
   area_name, sector_org_id, sector_name, location_id, location_name, location_latitude,
   location_longitude, bootcamp_ind, run_ind, ruck_ind, first_f_ind, second_f_ind,
   third_f_ind, pre_workout_ind, off_the_books_ind, vq_ind, convergence_ind,
-  all_types, all_tags, created, updated
+  all_types, all_tags, preblast, backblast, meta, created, updated
 FROM ${tableIdentifier(args.eventTable)}
 WHERE region_org_id = @regionOrgId
   ${where}
@@ -340,9 +375,10 @@ INSERT INTO events (
   area_name, sector_org_id, sector_name, location_id, location_name, location_latitude,
   location_longitude, bootcamp_ind, run_ind, ruck_ind, first_f_ind, second_f_ind,
   third_f_ind, pre_workout_ind, off_the_books_ind, vq_ind, convergence_ind,
-  all_types_json, all_tags_json, created, updated, synced_at
+  all_types_json, all_tags_json, preblast, backblast, event_meta_json, image_urls_json,
+  file_ids_json, created, updated, synced_at
 ) VALUES (
-  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 ON CONFLICT(id) DO UPDATE SET
   region_org_id = excluded.region_org_id,
@@ -378,6 +414,11 @@ ON CONFLICT(id) DO UPDATE SET
   convergence_ind = excluded.convergence_ind,
   all_types_json = excluded.all_types_json,
   all_tags_json = excluded.all_tags_json,
+  preblast = excluded.preblast,
+  backblast = excluded.backblast,
+  event_meta_json = excluded.event_meta_json,
+  image_urls_json = excluded.image_urls_json,
+  file_ids_json = excluded.file_ids_json,
   created = excluded.created,
   updated = excluded.updated,
   synced_at = excluded.synced_at
@@ -429,6 +470,11 @@ INSERT INTO sync_record_log (
         row.convergence_ind ?? 0,
         jsonString(row.all_types),
         jsonString(row.all_tags),
+        row.preblast || "",
+        row.backblast || "",
+        jsonString(row.meta),
+        JSON.stringify(arrayFromMeta(row.meta, "files")),
+        JSON.stringify(arrayFromMeta(row.meta, "file_ids")),
         normalizeTimestamp(row.created),
         normalizeTimestamp(row.updated),
         syncedAt
@@ -452,6 +498,7 @@ INSERT INTO sync_record_log (
           updated: normalizeTimestamp(row.updated),
           pax_count: row.pax_count ?? 0,
           fng_count: row.fng_count ?? 0,
+          image_count: arrayFromMeta(row.meta, "files").length,
         })
       );
     }
@@ -548,9 +595,17 @@ function printSummary(db) {
   const attendanceCount = db.prepare("SELECT COUNT(*) AS count FROM attendance").get().count;
   const firstEvent = db.prepare("SELECT MIN(start_date) AS value FROM events").get().value;
   const lastEvent = db.prepare("SELECT MAX(start_date) AS value FROM events").get().value;
+  const backblastCount = db
+    .prepare("SELECT COUNT(*) AS count FROM events WHERE COALESCE(backblast, '') != ''")
+    .get().count;
+  const imageUrlCount = db
+    .prepare("SELECT COUNT(*) AS count FROM events WHERE COALESCE(image_urls_json, '[]') NOT IN ('', '[]')")
+    .get().count;
   console.log(`SQLite events: ${eventCount}`);
   console.log(`SQLite attendance rows: ${attendanceCount}`);
   console.log(`Event date range: ${firstEvent || "n/a"} to ${lastEvent || "n/a"}`);
+  console.log(`Events with backblast text: ${backblastCount}`);
+  console.log(`Events with image URLs: ${imageUrlCount}`);
 }
 
 function printSyncRunSummary(stats, pruneStats) {

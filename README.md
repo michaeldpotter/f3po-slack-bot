@@ -126,6 +126,8 @@ npm run reporting:sync
 npm run reporting:health
 ```
 
+The reporting sync stores event/attendance metadata plus backblast/preblast text and event `meta` fields. When BigQuery includes boy-band/backblast image references, the sync also extracts those into `image_urls_json` and `file_ids_json` on the local `events` table.
+
 Test whether a Slack-style reporting question will hit the deterministic reporting/API path:
 
 ```sh
