@@ -174,6 +174,21 @@ try {
   assert.equal(regionScheduleRangeFollowup.range.start, "2026-05-02");
   assert.equal(regionScheduleRangeFollowup.range.end, "2026-05-16");
 
+  const regionScheduleAoFilterFollowup = classifyReportRequest("Show me just for Flyover", db, {
+    threadMessages: [
+      { text: "Can you show me the next 14 days?" },
+      {
+        text:
+          "📅 *F3 Wichita Schedule — next 14 days*\n\n" +
+          "• *2026-05-04* 5:30 AM-6:30 AM — Wild West: Q: Grease Monkey\n" +
+          "• *2026-05-06* 5:30 AM-6:30 AM — Flyover: Q: not marked in the F3 Nation calendar",
+      },
+    ],
+  });
+  assert.equal(regionScheduleAoFilterFollowup?.type, "scheduled_q_by_ao");
+  assert.equal(regionScheduleAoFilterFollowup.ao, "Flyover");
+  assert.equal(regionScheduleAoFilterFollowup.range.label, "next 14 days");
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
   const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
   const fileDb = new DatabaseSync(tmpDbPath);
