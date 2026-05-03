@@ -145,6 +145,26 @@ try {
   assert.equal(regionScheduleQFollowup?.type, "scheduled_workouts_by_region");
   assert.equal(regionScheduleQFollowup.range.label, "next week");
 
+  const regionScheduleRangeFollowup = classifyReportRequest(
+    "Can you show me for the next 14 days?",
+    db,
+    {
+      threadMessages: [
+        { text: "show me the schedule for next week" },
+        {
+          text:
+            "📅 *F3 Wichita Schedule — next week*\n\n" +
+            "• *2026-05-04* 5:30 AM-6:30 AM — Wild West: Q: Grease Monkey\n" +
+            "• *2026-05-06* 5:30 AM-6:30 AM — Flyover: Q: not marked in the F3 Nation calendar",
+        },
+      ],
+    }
+  );
+  assert.equal(regionScheduleRangeFollowup?.type, "scheduled_workouts_by_region");
+  assert.equal(regionScheduleRangeFollowup.range.label, "next 14 days");
+  assert.equal(regionScheduleRangeFollowup.range.start, "2026-05-02");
+  assert.equal(regionScheduleRangeFollowup.range.end, "2026-05-16");
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
   const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
   const fileDb = new DatabaseSync(tmpDbPath);
