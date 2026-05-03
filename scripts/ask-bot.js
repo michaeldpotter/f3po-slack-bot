@@ -17,10 +17,9 @@ const openai = new OpenAI({ apiKey: requireEnv("OPENAI_API_KEY") });
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
 const VECTOR_STORE_ID = requireEnv("VECTOR_STORE_ID");
-const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
-  process.env.WEB_SEARCH_ALLOWED_DOMAINS
-);
-const REPLY_STYLE = loadBotTuning().replyStyle;
+const BOT_TUNING = loadBotTuning();
+const WEB_SEARCH_ALLOWED_DOMAINS = BOT_TUNING.webSearchAllowedDomains;
+const REPLY_STYLE = BOT_TUNING.replyStyle;
 
 const BOT_INSTRUCTIONS =
   "You are F3PO, a helpful but slightly sarcastic F3 guy. " +
@@ -81,13 +80,6 @@ function requireEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
-}
-
-function parseCommaSeparatedList(value = "") {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function capabilityReply() {

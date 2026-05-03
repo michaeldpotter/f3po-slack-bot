@@ -37,9 +37,6 @@ const ALLOWED_CHANNEL_IDS = parseAllowedChannelIds(
 );
 const VECTOR_STORE_ID = requireEnv("VECTOR_STORE_ID");
 const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
-const WEB_SEARCH_ALLOWED_DOMAINS = parseCommaSeparatedList(
-  process.env.WEB_SEARCH_ALLOWED_DOMAINS
-);
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
 const LOG_RETENTION_DAYS = Number.parseInt(process.env.LOG_RETENTION_DAYS || "7", 10);
 const LOG_LEVEL = normalizeLogLevel(process.env.LOG_LEVEL || "info");
@@ -50,6 +47,7 @@ const INTERACTION_RETENTION_DAYS = Number.parseInt(
   10
 );
 const BOT_TUNING = loadBotTuning();
+const WEB_SEARCH_ALLOWED_DOMAINS = BOT_TUNING.webSearchAllowedDomains;
 const REPLY_STYLE = BOT_TUNING.replyStyle;
 const THREAD_FOLLOW_UP_MODE = BOT_TUNING.threadFollowUpMode;
 const MESSAGE_DEDUPE_TTL_MS = BOT_TUNING.messageDedupeTtlMs;
