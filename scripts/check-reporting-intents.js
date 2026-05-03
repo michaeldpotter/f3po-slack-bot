@@ -208,6 +208,13 @@ try {
   assert.equal(selfFirstBeatdown.order, "asc");
   assert.equal(selfFirstBeatdown.limit, 1);
 
+  const selfFirstBeatDown = classifyReportRequest("When was my first beat down?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstBeatDown?.type, "self_post_events");
+  assert.equal(selfFirstBeatDown.order, "asc");
+  assert.equal(selfFirstBeatDown.limit, 1);
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
