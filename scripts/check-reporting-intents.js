@@ -12,7 +12,7 @@ const manyEvents = Array.from({ length: 65 }, (_, index) => {
   const id = 100 + index;
   const day = String((index % 14) + 3).padStart(2, "0");
   const hour = String(5 + (index % 3)).padStart(2, "0");
-  return `(${id}, 'AO ${index + 1}', ${50000 + index}, '2026-05-${day}', '${hour}30', '${hour}45', 'Extra Beatdown ${index + 1}', 5)`;
+  return `(${id}, 'AO ${index + 1}', ${50000 + index}, '2026-05-${day}', '${hour}30', '${hour}45', 'Extra Beatdown ${index + 1}', 'Bootcamp', 5)`;
 }).join(",\n  ");
 
 const REPORTING_FIXTURE_SQL = `
@@ -24,6 +24,7 @@ CREATE TABLE events (
   start_time TEXT,
   end_time TEXT,
   name TEXT,
+  description TEXT,
   pax_count INTEGER
 );
 CREATE TABLE attendance (
@@ -33,17 +34,19 @@ CREATE TABLE attendance (
   q_ind INTEGER,
   coq_ind INTEGER
 );
-INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, name, pax_count) VALUES
-  (1, 'Wild West', 43950, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 12),
-  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 8),
-  (3, 'Flyover', 45713, '2026-05-02', '0530', '0615', 'Morning Flight', 9),
-  (4, 'Depot', 45209, '2026-05-02', '0700', '0800', 'Depot Beatdown', 7),
-  (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 10),
-  (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 11),
+INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, name, description, pax_count) VALUES
+  (1, 'Wild West', 43950, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 'Murph with burpees and coupon carries', 12),
+  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 'Bootcamp', 8),
+  (3, 'Flyover', 45713, '2026-05-02', '0530', '0615', 'Morning Flight', 'Bootcamp', 9),
+  (4, 'Depot', 45209, '2026-05-02', '0700', '0800', 'Depot Beatdown', 'Bootcamp', 7),
+  (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 'Murph with burpees and coupon carries', 10),
+  (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 'Hill ruck challenge', 11),
   ${manyEvents};
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0),
-  (2, 5, 'Hammer Pants', 1, 0);
+  (2, 5, 'Hammer Pants', 1, 0),
+  (3, 6, 'Dr Pepper Shake', 1, 0),
+  (4, 1, 'Hammer Pants', 1, 0);
 `;
 
 async function main() {
@@ -97,6 +100,13 @@ assert.equal(typoAoFollowup.range.label, "upcoming week");
 const leaderboard = classifyReportRequest("who qd the most at wild west last month", db, {});
 assert.equal(leaderboard?.type, "q_leaderboard_by_ao");
 assert.equal(leaderboard.range.label, "last month");
+
+const hardestBeatdowns = classifyReportRequest("Who has the hardest beatdowns ever?", db, {});
+assert.equal(hardestBeatdowns?.type, "hardest_beatdowns_fun");
+const hardestReport = runReport(db, hardestBeatdowns, {});
+assert.equal(hardestReport.source, "reporting_db_fun");
+assert.match(hardestReport.text, /Unofficial Misery Index/);
+assert.match(hardestReport.text, /Hammer Pants/);
 
 const thirdPartyLastWorkouts = classifyReportRequest(
   "Show me the last 5 workouts that <@U06MS2VU37C> was at",
