@@ -200,7 +200,10 @@ async function askOnce(prompt, args, threadMessages) {
   }
 
   const reportingReply = await maybeAnswerReportingQuestion(prompt, {
-    threadMessages: threadMessages.map((message) => ({ text: message.text })),
+    threadMessages: threadMessages.map((message) => ({
+      text: message.text,
+      reportingContext: message.reportingContext || null,
+    })),
     requesterName: args.requesterName || "",
     botUserId: process.env.TEST_BOT_USER_ID || "",
     log: (message, err) => console.error(`${message}: ${err?.message || err}`),
@@ -210,6 +213,7 @@ async function askOnce(prompt, args, threadMessages) {
     return {
       source: reportingReply.source,
       text: reportingReply.text,
+      reportingContext: reportingReply.reportingContext || null,
     };
   }
 
@@ -333,7 +337,11 @@ async function interactive(args) {
       console.log(`\nF3PO>\n${output}`);
 
       threadMessages.push({ role: "user", text: prompt });
-      threadMessages.push({ role: "assistant", text: result.text });
+      threadMessages.push({
+        role: "assistant",
+        text: result.text,
+        reportingContext: result.reportingContext || null,
+      });
       if (process.stdin.isTTY) rl.prompt();
     }
   } finally {

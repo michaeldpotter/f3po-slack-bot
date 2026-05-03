@@ -821,6 +821,16 @@ function truncate(s, max) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+function reportingSlackMetadata(reportingReply = {}) {
+  if (!reportingReply.reportingContext) return undefined;
+  return {
+    event_type: "f3po_reporting_context",
+    event_payload: {
+      reportingContext: reportingReply.reportingContext,
+    },
+  };
+}
+
 async function fetchThreadMessages(client, channel, threadTs) {
   const startedAt = monotonicNowMs();
   // conversations.replies returns the parent + replies
@@ -836,6 +846,14 @@ async function fetchThreadMessages(client, channel, threadTs) {
     .filter((m) => !m.subtype)
     // Keep only messages that actually have text
     .filter((m) => typeof m.text === "string" && m.text.trim().length > 0);
+
+  for (const message of messages) {
+    const reportingContext =
+      message.metadata?.event_payload?.reportingContext ||
+      message.metadata?.event_payload?.reporting_context ||
+      null;
+    if (reportingContext) message.reportingContext = reportingContext;
+  }
 
   // Keep the most recent N messages to limit prompt growth
   const sliced = messages.slice(Math.max(0, messages.length - MAX_THREAD_MESSAGES));
@@ -1498,6 +1516,7 @@ slackApp.event("app_mention", async ({ event, client, say, context }) => {
       await say({
         thread_ts: threadTs,
         text: reportingReply.text,
+        metadata: reportingSlackMetadata(reportingReply),
       });
       recordReply();
       logInteraction({
@@ -1922,6 +1941,7 @@ slackApp.message(async ({ message, client, say, context }) => {
       await say({
         thread_ts: threadTs,
         text: reportingReply.text,
+        metadata: reportingSlackMetadata(reportingReply),
       });
       recordReply();
       logInteraction({

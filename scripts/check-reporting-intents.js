@@ -235,6 +235,24 @@ try {
   assert.equal(namedPaxSameFirstPost.order, "asc");
   assert.equal(namedPaxSameFirstPost.label, "First Post");
 
+  const namedPaxSameFirstPostFromState = classifyReportRequest("What about Hammer Pants?", db, {
+    threadMessages: [
+      {
+        text: "",
+        reportingContext: {
+          type: "pax_post_events",
+          order: "asc",
+          limit: 1,
+          label: "First Post",
+          workoutKind: "",
+        },
+      },
+    ],
+  });
+  assert.equal(namedPaxSameFirstPostFromState?.type, "pax_post_events");
+  assert.equal(namedPaxSameFirstPostFromState.paxName, "Hammer Pants");
+  assert.equal(namedPaxSameFirstPostFromState.order, "asc");
+
   const selfFirstBeatdown = classifyReportRequest("When was my first beatdown?", db, {
     requesterName: "Chubbs",
   });
