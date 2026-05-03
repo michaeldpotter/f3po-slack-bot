@@ -215,6 +215,13 @@ try {
   assert.equal(selfFirstBeatDown.order, "asc");
   assert.equal(selfFirstBeatDown.limit, 1);
 
+  for (const text of ["When was my first boot camp?", "When was my first bootcamp?", "When was my first work out?"]) {
+    const intent = classifyReportRequest(text, db, { requesterName: "Chubbs" });
+    assert.equal(intent?.type, "self_post_events", text);
+    assert.equal(intent.order, "asc", text);
+    assert.equal(intent.limit, 1, text);
+  }
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
@@ -254,6 +261,10 @@ const regionSchedule = classifyReportRequest("Show me the schedule for next week
   const regionScheduleCases = [
     ["what workouts are on the calendar for the next 14 days?", "next 14 days", "2026-05-02", "2026-05-16"],
     ["show me all workouts tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all boot camps tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all bootcamps tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all rucks tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all hiking tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
     ["show me the F3 Wichita calendar this weekend", "this weekend", "2026-05-02", "2026-05-03"],
     ["what is the schedule next weekend?", "next weekend", "2026-05-09", "2026-05-10"],
     ["give us the Q schedule for next week at all AOs", "next week", "2026-05-04", "2026-05-10"],
