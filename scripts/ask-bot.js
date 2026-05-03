@@ -281,10 +281,8 @@ async function interactive(args) {
   const threadMessages = [];
   const sessionArgs = { ...args };
 
-  console.log("F3PO full-path tester. Type /help for commands.");
-  if (sessionArgs.requesterName) {
-    console.log(`Run-as PAX: ${sessionArgs.requesterName}`);
-  }
+  console.log("F3PO full-path tester.");
+  console.log(interactiveHelp(sessionArgs.requesterName));
 
   try {
     if (process.stdin.isTTY) rl.setPrompt("\nYou> ");
