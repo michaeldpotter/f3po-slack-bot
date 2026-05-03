@@ -61,10 +61,15 @@ Usage:
 Options:
   --interactive, -i   Keep a fake thread open for follow-up testing.
   --stdin             Read the prompt from stdin.
+  --pax "F3 Name"     Run self-referential reporting asks as this PAX.
   --json              Print raw source/text JSON.
   --help              Show this help.
 
 Commands in interactive mode:
+  /help               Show interactive commands.
+  /pax                Show the current run-as PAX.
+  /pax F3 Name        Set/change the run-as PAX for "I/me/my" asks.
+  /pax clear          Clear the run-as PAX.
   /thread             Show the current fake thread.
   /clear              Clear the fake thread.
   /exit               Quit.
@@ -73,12 +78,22 @@ Commands in interactive mode:
 
 function parseArgs(argv) {
   const args = argv.slice(2);
+  const valueAfter = (flag) => {
+    const index = args.indexOf(flag);
+    return index >= 0 ? args[index + 1] : undefined;
+  };
   return {
     help: args.includes("--help") || args.includes("-h"),
     stdin: args.includes("--stdin"),
     interactive: args.includes("--interactive") || args.includes("-i"),
     json: args.includes("--json"),
-    prompt: args.filter((arg) => !arg.startsWith("--") && arg !== "-i").join(" "),
+    requesterName: valueAfter("--pax") || process.env.TEST_REQUESTER_NAME || "",
+    prompt: args
+      .filter((arg, index) => {
+        const previous = args[index - 1];
+        return !arg.startsWith("--") && arg !== "-i" && previous !== "--pax";
+      })
+      .join(" "),
   };
 }
 
@@ -186,7 +201,7 @@ async function askOnce(prompt, args, threadMessages) {
 
   const reportingReply = await maybeAnswerReportingQuestion(prompt, {
     threadMessages: threadMessages.map((message) => ({ text: message.text })),
-    requesterName: process.env.TEST_REQUESTER_NAME || "",
+    requesterName: args.requesterName || "",
     botUserId: process.env.TEST_BOT_USER_ID || "",
     log: (message, err) => console.error(`${message}: ${err?.message || err}`),
   });
@@ -242,6 +257,21 @@ function printThread(threadMessages) {
   });
 }
 
+function interactiveHelp(currentPax = "") {
+  return [
+    "Commands:",
+    "  /help        Show this list.",
+    "  /pax         Show the current run-as PAX.",
+    "  /pax NAME    Set/change run-as PAX for I/me/my reporting asks.",
+    "  /pax clear   Clear the run-as PAX.",
+    "  /thread      Show the current fake thread.",
+    "  /clear       Clear the fake thread.",
+    "  /exit        Quit.",
+    "",
+    `Current run-as PAX: ${currentPax || "(none)"}`,
+  ].join("\n");
+}
+
 async function interactive(args) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -249,8 +279,12 @@ async function interactive(args) {
     terminal: process.stdin.isTTY,
   });
   const threadMessages = [];
+  const sessionArgs = { ...args };
 
-  console.log("F3PO full-path tester. Commands: /thread, /clear, /exit");
+  console.log("F3PO full-path tester. Type /help for commands.");
+  if (sessionArgs.requesterName) {
+    console.log(`Run-as PAX: ${sessionArgs.requesterName}`);
+  }
 
   try {
     if (process.stdin.isTTY) rl.setPrompt("\nYou> ");
@@ -260,6 +294,30 @@ async function interactive(args) {
       const prompt = line.trim();
       if (!prompt) continue;
       if (prompt === "/exit" || prompt === "/quit") break;
+      if (prompt === "/help" || prompt === "/?") {
+        console.log(interactiveHelp(sessionArgs.requesterName));
+        if (process.stdin.isTTY) rl.prompt();
+        continue;
+      }
+      if (prompt === "/pax") {
+        console.log(`Run-as PAX: ${sessionArgs.requesterName || "(none)"}`);
+        if (process.stdin.isTTY) rl.prompt();
+        continue;
+      }
+      if (prompt.startsWith("/pax ")) {
+        const nextPax = prompt.slice("/pax ".length).trim();
+        if (/^(clear|none|off|reset)$/i.test(nextPax)) {
+          sessionArgs.requesterName = "";
+          console.log("Run-as PAX cleared.");
+        } else if (nextPax) {
+          sessionArgs.requesterName = nextPax;
+          console.log(`Run-as PAX set to: ${sessionArgs.requesterName}`);
+        } else {
+          console.log("Usage: /pax F3 Name");
+        }
+        if (process.stdin.isTTY) rl.prompt();
+        continue;
+      }
       if (prompt === "/clear") {
         threadMessages.length = 0;
         console.log("Thread cleared.");
@@ -272,8 +330,8 @@ async function interactive(args) {
         continue;
       }
 
-      const result = await askOnce(prompt, args, threadMessages);
-      const output = args.json ? JSON.stringify(result, null, 2) : `[${result.source}]\n${result.text}`;
+      const result = await askOnce(prompt, sessionArgs, threadMessages);
+      const output = sessionArgs.json ? JSON.stringify(result, null, 2) : `[${result.source}]\n${result.text}`;
       console.log(`\nF3PO>\n${output}`);
 
       threadMessages.push({ role: "user", text: prompt });
