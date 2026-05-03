@@ -15,6 +15,7 @@ CREATE TABLE events (
   ao_org_id INTEGER,
   start_date TEXT,
   start_time TEXT,
+  end_time TEXT,
   name TEXT,
   pax_count INTEGER
 );
@@ -25,13 +26,16 @@ CREATE TABLE attendance (
   q_ind INTEGER,
   coq_ind INTEGER
 );
-INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, name, pax_count) VALUES
-  (1, 'Wild West', 43950, '2026-05-02', '0630', 'Saturday Beatdown', 12),
-  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02', '0630', 'Saturday Beatdown', 8),
-  (3, 'Flyover', 45713, '2026-05-02', '0530', 'Morning Flight', 9),
-  (4, 'Depot', 45209, '2026-05-02', '0700', 'Depot Beatdown', 7);
+INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, name, pax_count) VALUES
+  (1, 'Wild West', 43950, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 12),
+  (2, 'Time Will Tell (TWT)', 12345, '2026-05-02', '0630', '0730', 'Saturday Beatdown', 8),
+  (3, 'Flyover', 45713, '2026-05-02', '0530', '0615', 'Morning Flight', 9),
+  (4, 'Depot', 45209, '2026-05-02', '0700', '0800', 'Depot Beatdown', 7),
+  (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 10),
+  (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 11);
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
-  (1, 1, 'Chubbs', 0, 0);
+  (1, 1, 'Chubbs', 0, 0),
+  (2, 5, 'Hammer Pants', 1, 0);
 `;
 
 async function main() {
@@ -116,6 +120,18 @@ try {
     { requesterName: "Chubbs" }
   );
   assert.equal(namedSelfWeekdays?.type, "self_recent_weekday_attendance");
+
+  const regionSchedule = classifyReportRequest("Show me the schedule for next week", db, {});
+  assert.equal(regionSchedule?.type, "scheduled_workouts_by_region");
+  assert.equal(regionSchedule.range.label, "next week");
+  assert.equal(regionSchedule.range.start, "2026-05-04");
+  assert.equal(regionSchedule.range.end, "2026-05-10");
+
+  const regionScheduleReport = runReport(db, regionSchedule, {});
+  assert.equal(regionScheduleReport.source, "reporting_db_region");
+  assert.match(regionScheduleReport.text, /F3 Wichita Schedule — next week/);
+  assert.match(regionScheduleReport.text, /Wild West: Monday Beatdown; Q: Hammer Pants/);
+  assert.match(regionScheduleReport.text, /Flyover: Wednesday Flight/);
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "f3po-reporting-test-"));
   const tmpDbPath = path.join(tmpDir, "f3po-reporting.sqlite");
