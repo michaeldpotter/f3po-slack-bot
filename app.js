@@ -126,12 +126,15 @@ const BOT_INSTRUCTIONS =
   "Avoid giant paragraphs; prefer 1-3 short sections with whitespace between them. " +
   "Stay on topic. Do not drift to discussing non-F3 topics. " +
   "Do not invent Slack channels, and do not tell users to post in a channel. " +
+  "When the user says something like 'see above', 'what he said', 'same question', 'that one', or asks you to answer a referenced item, use the current Slack thread context first and answer the referenced question directly. Only restate the referenced context in a short phrase if needed for clarity. " +
+  "For workout designs, exercise lists, Q sheets, and exercise how-to answers, stay compact and useful. If asked for exercises, give 8-10 good options max. If asked for a full workout, give one runnable workout with warm-up, main work, finisher, and quick modifications; do not write an encyclopedia unless asked. " +
+  "For questions about teaching or training the bot on a challenge, event, AO, or recurring topic, keep it brief: say to add or update the relevant vectorstore doc with aliases/search terms and rerun `npm run rag:add`; offer a template only if the user asks. " +
   `For ${LOCAL_REGION_NAME} leadership, roster, Site Q, AO Q, or role-holder questions, answer the specific question directly and stop once the useful fact and brief source context are given. Do not add generic confirmation/contact next steps, F3 Nation app advice, \`/calendar\` advice, or channel suggestions unless the user explicitly asks how to verify, contact, or update the information. ` +
   "You are the bot, not a PAX and not a Q. Never say or imply that you are Qing, calling Q, leading, attending, or choosing a workout. " +
   "When offering follow-up help about leadership, say 'who is Qing', 'who is scheduled to Q', or 'who is leading' instead of 'which one I am calling Q'. " +
   "If you cannot confirm who is scheduled to Q for a specific upcoming workout date after using the reporting/API path and available docs, do not offer to draft Slack messages or DMs, and do not offer to read a Slack signup thread. Briefly say you cannot confirm the scheduled Q from the available data. " +
   "Detect obvious F3 ribbing, jokes, and facetious questions. If a question is playful rather than factual, answer playfully and briefly instead of treating it like a research assignment. " +
-  "For playful questions about a PAX, keep it harmless and avoid mean personal claims, private facts, or pretending to have inspected photos unless the thread itself includes the photo. " +
+  "For playful questions about a PAX, keep it harmless and avoid mean personal claims, private facts, or pretending to have inspected photos unless the thread itself includes the photo. For photo-proof questions such as whether a PAX smiled, wore a shirt color, or looked at the camera, treat it as playful by default; do not web-search unless the user explicitly asks for a serious public-source search. " +
   "When asked for F3 name ideas for a new PAX, explain that good names come from the PAX's story and ask for 2-3 useful details first: first or hospital name, job, hometown, hobbies, teams, personality, or a funny first-post moment. Do not suggest existing Wichita PAX names as reusable names. Use existing names only as style examples if needed, clearly labeled as examples. Avoid generic tough-guy names; prefer playful, specific, memorable, usually ironic options. " +
   "Do not ask users to paste, upload, or link backblasts, Slack threads, photos, or other source material for you to inspect. You can use the current Slack thread text, the local reporting DB, vector-store docs, and approved web search only. " +
   "Assume you cannot log into Facebook or search private Facebook groups, profiles, or private Slack channels. Do not offer Facebook or private Slack searching unless the user provides a public URL that approved web search can access. " +
@@ -152,6 +155,7 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "Do not answer from general knowledge in this pass. " +
   "Do not ask the user whether you should search approved websites. " +
   "Do not offer to search, list searchable domains, or ask which site to check. " +
+  "For 'see above', 'what he said', 'same question', and similar referenced follow-ups, use the Slack thread context first and answer the referenced item directly when the thread contains enough context. " +
   `For answered ${LOCAL_REGION_NAME} leadership, roster, Site Q, AO Q, or role-holder questions, do not add generic confirmation/contact next steps, F3 Nation app advice, \`/calendar\` advice, or channel suggestions unless the user explicitly asks for that. ` +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
   "Assume Facebook and private Slack content are unavailable unless already present in the current thread or approved docs. Do not offer to go search them. " +
@@ -164,6 +168,7 @@ const WEB_FALLBACK_INSTRUCTIONS =
   "The vector store did not contain enough information. Answer using the Slack thread conversation and allowed F3 websites via web search. " +
   "Use web search proactively; do not ask the user for permission to search and do not ask which approved site to check. " +
   "If a specific source would be useful, search the allowed domains and use the best available result. " +
+  "For referenced Slack follow-ups, preserve the thread subject unless the user clearly changes it. " +
   "Do not list the allowed domains unless the user explicitly asks what domains are enabled. " +
   "Do not include source markers, annotation tokens, or citation markup in the final answer. " +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
@@ -923,6 +928,8 @@ function classifyMessageTone(text = "") {
     /\bdoes\s+.+?\s+(know how to|even|actually)\b/,
     /\bwhy\s+is\s+.+?\s+so\b/,
     /\bprove\s+.+?\b/,
+    /\b(backblast|photo|picture|image)\b.*\b(smile|smiled|shirt|camera|looking|proof|evidence)\b/,
+    /\b(smile|smiled|shirt|camera|looking|proof|evidence)\b.*\b(backblast|photo|picture|image)\b/,
     /\b(are you sure|seems sus|that seems sus|suspect|suspicious)\b/,
     /\bevidence\b.*\b(smiled|smile|ran|run|burpee|coupon)\b/,
     /\b(allegedly|myth|legend|rumor|scientifically|confirmed|unconfirmed)\b/,
@@ -973,6 +980,18 @@ function maybeAnswerPlayfulQuestion(text = "", toneResult = classifyMessageTone(
       text:
         "Sus vibes acknowledged 🕵️. But if the finisher sheet has him that high, the spreadsheet has spoken. " +
         "Apparently somebody found the turbo button and failed to disclose it to the rest of the PAX.",
+      source: "playful_reply",
+    };
+  }
+
+  const photoProofQuestion =
+    /\b(backblast|photo|picture|image)\b/.test(normalized) &&
+    /\b(smile|smiled|shirt|camera|looking|proof|evidence)\b/.test(normalized);
+  if (photoProofQuestion) {
+    return {
+      text:
+        "I can’t inspect private Slack/Facebook photos from here, so I’m not going to pretend I saw the receipt 📸. " +
+        "Official ruling: possible, suspicious, and absolutely worth bringing up at coffeeteria.",
       source: "playful_reply",
     };
   }
