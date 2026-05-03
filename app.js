@@ -133,6 +133,7 @@ const BOT_INSTRUCTIONS =
   "Detect obvious F3 ribbing, jokes, and facetious questions. If a question is playful rather than factual, answer playfully and briefly instead of treating it like a research assignment. " +
   "For playful questions about a PAX, keep it harmless and avoid mean personal claims, private facts, or pretending to have inspected photos unless the thread itself includes the photo. " +
   "Do not ask users to paste, upload, or link backblasts, Slack threads, photos, or other source material for you to inspect. You can use the current Slack thread text, the local reporting DB, vector-store docs, and approved web search only. " +
+  "Assume you cannot log into Facebook or search private Facebook groups, profiles, or private Slack channels. Do not offer Facebook or private Slack searching unless the user provides a public URL that approved web search can access. " +
   `Handle any questions or comments about ${LOCAL_REGION_NAME} TechQ / ITQ Chubbs with care and respect. ` +
   `If asked who created you, who built you, or about your creator, credit Chubbs as the ${LOCAL_REGION_NAME} TechQ / ITQ who created you, and avoid sarcasm or jokes at his expense. ` +
   `For ${LOCAL_REGION_NAME} tech or IT contact questions, identify Chubbs as the ${LOCAL_REGION_NAME} TechQ / ITQ. ` +
@@ -152,6 +153,7 @@ const VECTOR_ONLY_INSTRUCTIONS =
   "Do not offer to search, list searchable domains, or ask which site to check. " +
   `For answered ${LOCAL_REGION_NAME} leadership, roster, Site Q, AO Q, or role-holder questions, do not add generic confirmation/contact next steps, F3 Nation app advice, \`/calendar\` advice, or channel suggestions unless the user explicitly asks for that. ` +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
+  "Assume Facebook and private Slack content are unavailable unless already present in the current thread or approved docs. Do not offer to go search them. " +
   "If the file-search docs only contain a partial answer and the user likely needs official, current, registration, rules, schedule, location, or standards information, return exactly NEED_WEB_SEARCH and nothing else. " +
   "If the Slack thread or file-search docs contain enough information to answer, answer normally. " +
   "If they do not contain enough information and web search would be needed, return exactly NEED_WEB_SEARCH and nothing else.";
@@ -164,6 +166,7 @@ const WEB_FALLBACK_INSTRUCTIONS =
   "Do not list the allowed domains unless the user explicitly asks what domains are enabled. " +
   "Do not include source markers, annotation tokens, or citation markup in the final answer. " +
   "Do not ask the user to paste, upload, or link Slack threads, backblasts, photos, or files. " +
+  "Assume Facebook and private Slack content are unavailable unless the approved web search can access a public page. Do not offer to log in, join groups, inspect private channels, or search private Facebook/Slack content. " +
   "If the allowed websites do not contain the answer, say so briefly and offer a safe adjacent answer if one is available.";
 
 function pickRandom(arr) {
@@ -1012,6 +1015,20 @@ function isQuestionLike(text = "") {
   );
 }
 
+function isShortContinuationLike(text = "") {
+  const cleaned = cleanSlackText(text)
+    .replace(/<@[\w]+>/g, "")
+    .replace(/[^\w\s']/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  return (
+    /^(or|and|also|same for|what about|how about)\b/.test(cleaned) &&
+    cleaned.split(/\s+/).filter(Boolean).length <= 8
+  );
+}
+
 function previousBotMessage(messages, botUserId, latestMessage) {
   const latestTs = latestMessage?.ts || "";
   const beforeLatest = latestTs
@@ -1126,6 +1143,17 @@ async function shouldReplyToThreadMessage(messages, botUserId, latestMessage) {
         shouldReply: true,
         decision: "YES",
         reason: "The previous bot reply invited a follow-up and the latest message asks a question.",
+        elapsedMs: elapsedMsSince(startedAt),
+      };
+    }
+  }
+  if (isShortContinuationLike(text)) {
+    const previousBot = previousBotMessage(messages, botUserId, latestMessage);
+    if (previousBot && botInvitedFollowUp(previousBot.text)) {
+      return {
+        shouldReply: true,
+        decision: "YES",
+        reason: "The previous bot reply invited options and the latest message is a short continuation.",
         elapsedMs: elapsedMsSince(startedAt),
       };
     }

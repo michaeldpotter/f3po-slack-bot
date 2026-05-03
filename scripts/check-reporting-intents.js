@@ -98,6 +98,25 @@ const leaderboard = classifyReportRequest("who qd the most at wild west last mon
 assert.equal(leaderboard?.type, "q_leaderboard_by_ao");
 assert.equal(leaderboard.range.label, "last month");
 
+const thirdPartyLastWorkouts = classifyReportRequest(
+  "Show me the last 5 workouts that <@U06MS2VU37C> was at",
+  db,
+  { requesterName: "Chubbs", botUserId: "U0AVA0SAXDL" }
+);
+assert.equal(thirdPartyLastWorkouts?.type, "blocked_recent_person_attendance");
+
+const firstNantan = classifyReportRequest("Who was the first nantan?", db, {});
+assert.equal(firstNantan, null);
+
+const betaAnnouncement = classifyReportRequest(
+  "_*Hey PAX, I’m opening this channel up for some F3PO beta testing.*_ " +
+    "F3PO is our Slack bot that can answer questions using F3 Wichita / F3 Nation docs. " +
+    "Example: <@U0AVA0SAXDL> Who is the Tech Q for F3 Wichita?",
+  db,
+  { botUserId: "U0AVA0SAXDL" }
+);
+assert.equal(betaAnnouncement, null);
+
 const realDate = Date;
 class FixedDate extends Date {
   constructor(...args) {
@@ -144,6 +163,8 @@ try {
     ["show me all workouts tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
     ["show me the F3 Wichita calendar this weekend", "this weekend", "2026-05-02", "2026-05-03"],
     ["what is the schedule next weekend?", "next weekend", "2026-05-09", "2026-05-10"],
+    ["give us the Q schedule for next week at all AOs", "next week", "2026-05-04", "2026-05-10"],
+    ["show open q slots next week", "next week", "2026-05-04", "2026-05-10"],
   ];
 
   for (const [text, label, start, end] of regionScheduleCases) {
