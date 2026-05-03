@@ -201,6 +201,21 @@ try {
   assert.equal(selfFirstPost?.type, "self_post_events");
   assert.equal(selfFirstPost.order, "asc");
 
+  const selfFirstBeatdown = classifyReportRequest("When was my first beatdown?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstBeatdown?.type, "self_post_events");
+  assert.equal(selfFirstBeatdown.order, "asc");
+  assert.equal(selfFirstBeatdown.limit, 1);
+
+  const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstBeatdownInYear?.type, "self_post_events");
+  assert.equal(selfFirstBeatdownInYear.range.label, "2024");
+  assert.equal(selfFirstBeatdownInYear.range.start, "2024-01-01");
+  assert.equal(selfFirstBeatdownInYear.range.end, "2024-12-31");
+
   const namedPaxFirstQ = classifyReportRequest("When was Hammer Pants first Q?", db, {});
   assert.equal(namedPaxFirstQ?.type, "pax_q_events");
   assert.equal(namedPaxFirstQ.paxName, "Hammer Pants");
