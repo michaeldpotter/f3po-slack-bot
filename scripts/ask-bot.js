@@ -111,6 +111,25 @@ function maybeAnswerCapabilityQuestion(text = "") {
   return null;
 }
 
+function maybeAnswerPlayfulPhotoQuestion(text = "") {
+  const normalized = text
+    .replace(/<@[\w]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  const asksPhotoProof =
+    /\b(backblast|photo|picture|image)\b/.test(normalized) &&
+    /\b(smile|smiled|shirt|camera|looking|proof|evidence)\b/.test(normalized);
+  const asksSmileProof = /\bhas\s+.+?\s+ever\s+smiled\b/.test(normalized);
+
+  if (!asksPhotoProof && !asksSmileProof) return null;
+
+  return (
+    "I can’t inspect private Slack/Facebook photos from here, so I’m not going to pretend I saw the receipt 📸. " +
+    "Official ruling: possible, suspicious, and absolutely worth bringing up at coffeeteria."
+  );
+}
+
 function buildTools({ includeFileSearch = true, includeWebSearch = false } = {}) {
   const tools = [];
   if (includeFileSearch) {
@@ -154,6 +173,14 @@ async function askOnce(prompt, args, threadMessages) {
     return {
       source: "bot_help",
       text: capability,
+    };
+  }
+
+  const playfulPhotoReply = maybeAnswerPlayfulPhotoQuestion(prompt);
+  if (playfulPhotoReply) {
+    return {
+      source: "playful_reply",
+      text: playfulPhotoReply,
     };
   }
 
