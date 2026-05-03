@@ -43,6 +43,7 @@ INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, na
   (4, 'Depot', 45209, '2026-05-02', '0700', '0800', 'Depot Beatdown', 'Bootcamp', 7, '["https://example.com/depot.jpg"]', '["F4"]'),
   (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 'Murph with burpees and coupon carries', 10, '[]', '[]'),
   (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 'Hill ruck challenge', 11, '[]', '[]'),
+  (7, 'Depot', 45209, '2026-04-15', '0530', '0615', 'Midweek Bootcamp', 'Bootcamp', 6, '[]', '[]'),
   ${manyEvents};
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0),
@@ -50,7 +51,8 @@ INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (3, 6, 'Dr Pepper Shake', 1, 0),
   (4, 1, 'Hammer Pants', 1, 0),
   (5, 4, 'Chubbs', 1, 0),
-  (6, 6, 'Chubbs', 0, 1);
+  (6, 6, 'Chubbs', 0, 1),
+  (7, 7, 'Chubbs', 0, 0);
 `;
 
 async function main() {
@@ -272,6 +274,46 @@ const namedPaxFirstBeatdown = classifyReportRequest("when was chubbs first beatd
 assert.equal(namedPaxFirstBeatdown?.type, "pax_post_events");
 assert.equal(namedPaxFirstBeatdown.paxName, "Chubbs");
 assert.equal(namedPaxFirstBeatdown.label, "First Post");
+
+const namedPaxLastBeatdown = classifyReportRequest("when was chubbs last beatdown?", db, {});
+assert.equal(namedPaxLastBeatdown?.type, "pax_post_events");
+assert.equal(namedPaxLastBeatdown.paxName, "Chubbs");
+assert.equal(namedPaxLastBeatdown.order, "desc");
+assert.equal(namedPaxLastBeatdown.label, "Most Recent Post");
+const namedPaxLastBeatdownReport = runReport(db, namedPaxLastBeatdown, {});
+assert.equal(namedPaxLastBeatdownReport.source, "reporting_db_pax");
+assert.match(namedPaxLastBeatdownReport.text, /2026-05-06/);
+
+const namedPaxLastRuck = classifyReportRequest("when was chubbs last ruck?", db, {});
+assert.equal(namedPaxLastRuck?.type, "pax_post_events");
+assert.equal(namedPaxLastRuck.workoutKind, "ruck");
+const namedPaxLastRuckReport = runReport(db, namedPaxLastRuck, {});
+assert.match(namedPaxLastRuckReport.text, /Chubbs's Most Recent Ruck/);
+assert.match(namedPaxLastRuckReport.text, /2026-05-06/);
+
+const namedPaxCountLastMonth = classifyReportRequest("how many times has chubbs been at a workout in the last month?", db, {});
+assert.equal(namedPaxCountLastMonth?.type, "pax_post_count");
+assert.equal(namedPaxCountLastMonth.range.label, "last month");
+const namedPaxCountLastMonthReport = runReport(db, namedPaxCountLastMonth, {});
+assert.match(namedPaxCountLastMonthReport.text, /Chubbs's Post Count — last month/);
+assert.match(namedPaxCountLastMonthReport.text, /Posts: \*1\*/);
+
+const namedPaxRuckCount = classifyReportRequest("how many rucks has chubbs done?", db, {});
+assert.equal(namedPaxRuckCount?.type, "pax_post_count");
+assert.equal(namedPaxRuckCount.workoutKind, "ruck");
+const namedPaxRuckCountReport = runReport(db, namedPaxRuckCount, {});
+assert.match(namedPaxRuckCountReport.text, /Chubbs's Ruck Count/);
+assert.match(namedPaxRuckCountReport.text, /Rucks: \*1\*/);
+
+const namedPaxAoSummary = classifyReportRequest("what AOs has chubbs posted at this year?", db, {});
+assert.equal(namedPaxAoSummary?.type, "pax_post_aos");
+assert.equal(namedPaxAoSummary.range.label, "this year");
+const namedPaxAoSummaryReport = runReport(db, namedPaxAoSummary, {});
+assert.match(namedPaxAoSummaryReport.text, /AOs Chubbs Has Posted — this year/);
+assert.match(namedPaxAoSummaryReport.text, /Wild West/);
+
+const namedPaxLastFiveBlocked = classifyReportRequest("show me chubbs last 5 workouts", db, {});
+assert.equal(namedPaxLastFiveBlocked?.type, "blocked_recent_person_attendance");
 
 const qSourceDocsQuestion = classifyReportRequest("Did Mariachi ever take Q Source?", db, {});
 assert.equal(qSourceDocsQuestion, null);
