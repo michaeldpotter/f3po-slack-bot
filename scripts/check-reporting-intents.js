@@ -224,6 +224,12 @@ try {
     assert.equal(intent.limit, 1, text);
   }
 
+  const selfFirstBc = classifyReportRequest("When was my first BC?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstBc?.type, "self_post_events");
+  assert.equal(selfFirstBc.order, "asc");
+
   const selfFirstRuck = classifyReportRequest("When was my first ruck?", db, {
     requesterName: "Chubbs",
   });
@@ -275,6 +281,11 @@ assert.equal(namedPaxFirstBeatdown?.type, "pax_post_events");
 assert.equal(namedPaxFirstBeatdown.paxName, "Chubbs");
 assert.equal(namedPaxFirstBeatdown.label, "First Post");
 
+const namedPaxFirstBc = classifyReportRequest("when was chubbs first bc?", db, {});
+assert.equal(namedPaxFirstBc?.type, "pax_post_events");
+assert.equal(namedPaxFirstBc.paxName, "Chubbs");
+assert.equal(namedPaxFirstBc.label, "First Post");
+
 const namedPaxLastBeatdown = classifyReportRequest("when was chubbs last beatdown?", db, {});
 assert.equal(namedPaxLastBeatdown?.type, "pax_post_events");
 assert.equal(namedPaxLastBeatdown.paxName, "Chubbs");
@@ -283,6 +294,11 @@ assert.equal(namedPaxLastBeatdown.label, "Most Recent Post");
 const namedPaxLastBeatdownReport = runReport(db, namedPaxLastBeatdown, {});
 assert.equal(namedPaxLastBeatdownReport.source, "reporting_db_pax");
 assert.match(namedPaxLastBeatdownReport.text, /2026-05-06/);
+
+const namedPaxLastBd = classifyReportRequest("when was chubbs last BD?", db, {});
+assert.equal(namedPaxLastBd?.type, "pax_post_events");
+assert.equal(namedPaxLastBd.paxName, "Chubbs");
+assert.equal(namedPaxLastBd.order, "desc");
 
 const namedPaxLastRuck = classifyReportRequest("when was chubbs last ruck?", db, {});
 assert.equal(namedPaxLastRuck?.type, "pax_post_events");
@@ -327,6 +343,8 @@ const regionSchedule = classifyReportRequest("Show me the schedule for next week
   const regionScheduleCases = [
     ["what workouts are on the calendar for the next 14 days?", "next 14 days", "2026-05-02", "2026-05-16"],
     ["show me all workouts tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all BDs tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
+    ["show me all BCs tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
     ["show me all boot camps tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
     ["show me all bootcamps tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
     ["show me all rucks tomorrow", "tomorrow", "2026-05-03", "2026-05-03"],
