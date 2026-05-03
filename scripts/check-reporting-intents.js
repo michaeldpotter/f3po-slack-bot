@@ -222,6 +222,16 @@ try {
     assert.equal(intent.limit, 1, text);
   }
 
+  const selfFirstRuck = classifyReportRequest("When was my first ruck?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFirstRuck?.type, "self_post_events");
+  assert.equal(selfFirstRuck.workoutKind, "ruck");
+  const selfFirstRuckReport = runReport(db, selfFirstRuck, { requesterName: "Chubbs" });
+  assert.match(selfFirstRuckReport.text, /First Ruck/);
+  assert.match(selfFirstRuckReport.text, /2026-05-06/);
+  assert.doesNotMatch(selfFirstRuckReport.text, /2026-05-02/);
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
@@ -284,6 +294,14 @@ const regionSchedule = classifyReportRequest("Show me the schedule for next week
   assert.match(regionScheduleReport.text, /F3 Wichita Schedule — next week/);
   assert.match(regionScheduleReport.text, /Wild West: Monday Beatdown; Q: Hammer Pants/);
   assert.match(regionScheduleReport.text, /Flyover: Wednesday Flight/);
+
+  const ruckSchedule = classifyReportRequest("show me all rucks next week", db, {});
+  assert.equal(ruckSchedule?.type, "scheduled_workouts_by_region");
+  assert.equal(ruckSchedule.workoutKind, "ruck");
+  const ruckScheduleReport = runReport(db, ruckSchedule, {});
+  assert.match(ruckScheduleReport.text, /F3 Wichita Ruck Schedule — next week/);
+  assert.match(ruckScheduleReport.text, /Flyover: Wednesday Flight/);
+  assert.doesNotMatch(ruckScheduleReport.text, /Wild West: Monday Beatdown/);
   assert.doesNotMatch(regionScheduleReport.text, /Showing 30 of/);
 
   const boyBandByAo = classifyReportRequest("show me the boy band for Wild West last Saturday", db, {});
