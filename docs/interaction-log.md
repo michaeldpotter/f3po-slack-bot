@@ -42,15 +42,11 @@ export/google/f3po-conversations.sqlite
 ```sh
 INTERACTION_DB_PATH=export/google/f3po-conversations.sqlite
 INTERACTION_RETENTION_DAYS=90
-MESSAGE_DEDUPE_TTL_MS=300000
-QUESTION_DEDUPE_TTL_MS=120000
-THREAD_REPLY_LIMIT=4
-THREAD_REPLY_LIMIT_WINDOW_MS=60000
 ```
 
 The bot prunes old interaction rows on startup and once per day while running.
 
-The duplicate/reply-limit settings are runtime safety rails. They keep Slack retries, repeated near-identical questions, or noisy threads from producing unbounded model calls.
+Duplicate/reply-limit settings live in `lib/bot-tuning.js`. They keep Slack retries, repeated near-identical questions, or noisy threads from producing unbounded model calls.
 
 ## Search
 
