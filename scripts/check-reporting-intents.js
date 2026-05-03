@@ -177,6 +177,16 @@ try {
   assert.match(firstSelfQReport.text, /Chubbs's First Q/);
   assert.match(firstSelfQReport.text, /Depot: Depot Beatdown/);
 
+  const eventDetailFollowup = classifyReportRequest("Can you show me that beatdown?", db, {
+    threadMessages: [{ text: firstSelfQReport.text }],
+  });
+  assert.equal(eventDetailFollowup?.type, "event_detail_followup");
+  assert.equal(eventDetailFollowup.event.ao, "Depot");
+  const eventDetailReport = runReport(db, eventDetailFollowup, {});
+  assert.equal(eventDetailReport.source, "reporting_db_followup");
+  assert.match(eventDetailReport.text, /Depot Beatdown/);
+  assert.match(eventDetailReport.text, /Bootcamp/);
+
   const selfQCount = classifyReportRequest("how many times have I Qed?", db, {
     requesterName: "Chubbs",
   });
