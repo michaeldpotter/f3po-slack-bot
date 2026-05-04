@@ -44,6 +44,7 @@ INSERT INTO events (id, ao_name, ao_org_id, start_date, start_time, end_time, na
   (5, 'Wild West', 43950, '2026-05-04', '0530', '0615', 'Monday Beatdown', 'Murph with burpees and coupon carries', 10, '[]', '[]'),
   (6, 'Flyover', 45713, '2026-05-06', '0530', '0615', 'Wednesday Flight', 'Hill ruck challenge', 11, '[]', '[]'),
   (7, 'Depot', 45209, '2026-04-15', '0530', '0615', 'Midweek Bootcamp', 'Bootcamp', 6, '[]', '[]'),
+  (8, 'Fortress', 22222, '2026-04-20', '0530', '0615', 'April Q Test', 'Bootcamp', 6, '[]', '[]'),
   ${manyEvents};
 INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (1, 1, 'Chubbs', 0, 0),
@@ -54,7 +55,8 @@ INSERT INTO attendance (id, event_instance_id, f3_name, q_ind, coq_ind) VALUES
   (6, 6, 'Chubbs', 0, 1),
   (7, 7, 'Chubbs', 0, 0),
   (8, 4, 'Dr Pepper Shake', 0, 0),
-  (9, 4, 'Mariachi', 0, 0);
+  (9, 4, 'Mariachi', 0, 0),
+  (10, 8, 'Big Tip', 1, 0);
 `;
 
 async function main() {
@@ -108,6 +110,13 @@ assert.equal(typoAoFollowup.range.label, "upcoming week");
 const leaderboard = classifyReportRequest("who qd the most at wild west last month", db, {});
 assert.equal(leaderboard?.type, "q_leaderboard_by_ao");
 assert.equal(leaderboard.range.label, "last month");
+
+const overallLeaderboard = classifyReportRequest("Who Q'ed the most in April", db, {});
+assert.equal(overallLeaderboard?.type, "q_leaderboard_overall");
+assert.equal(overallLeaderboard.range.label, "April 2026");
+const overallLeaderboardReport = runReport(db, overallLeaderboard, {});
+assert.equal(overallLeaderboardReport.source, "reporting_db");
+assert.match(overallLeaderboardReport.text, /Q Leaderboard — April 2026/);
 
 const hardestBeatdowns = classifyReportRequest("Who has the hardest beatdowns ever?", db, {});
 assert.equal(hardestBeatdowns?.type, "hardest_beatdowns_fun");
