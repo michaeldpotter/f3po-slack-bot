@@ -122,6 +122,21 @@ const overallLeaderboardNoApostrophe = classifyReportRequest("Who Qed the most i
 assert.equal(overallLeaderboardNoApostrophe?.type, "q_leaderboard_overall");
 assert.equal(overallLeaderboardNoApostrophe.range.label, "April 2026");
 
+const postLeaderboard = classifyReportRequest("Who posted the most in April", db, {});
+assert.equal(postLeaderboard?.type, "post_leaderboard_overall");
+assert.equal(postLeaderboard.range.label, "April 2026");
+const postLeaderboardReport = runReport(db, postLeaderboard, {});
+assert.equal(postLeaderboardReport.source, "reporting_db");
+assert.match(postLeaderboardReport.text, /Post Leaderboard — April 2026/);
+
+const ruckLeaderboard = classifyReportRequest("Who was at the most rucks in May?", db, {});
+assert.equal(ruckLeaderboard?.type, "post_leaderboard_overall");
+assert.equal(ruckLeaderboard.workoutKind, "ruck");
+assert.equal(ruckLeaderboard.range.label, "MAY 2026");
+const ruckLeaderboardReport = runReport(db, ruckLeaderboard, {});
+assert.equal(ruckLeaderboardReport.source, "reporting_db");
+assert.match(ruckLeaderboardReport.text, /Ruck Leaderboard/);
+
 const hardestBeatdowns = classifyReportRequest("Who has the hardest beatdowns ever?", db, {});
 assert.equal(hardestBeatdowns?.type, "hardest_beatdowns_fun");
 const hardestReport = runReport(db, hardestBeatdowns, {});
