@@ -364,6 +364,16 @@ try {
   assert.equal(favoriteAoFollowupReport.source, "reporting_db_pax");
   assert.match(favoriteAoFollowupReport.text, /Hammer Pants's Favorite AO/);
 
+  const selfFavoriteRuckingAo = classifyReportRequest("What is my favorite rucking ao?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFavoriteRuckingAo?.type, "self_favorite_ao");
+  assert.equal(selfFavoriteRuckingAo.workoutKind, "ruck");
+  const selfFavoriteRuckingAoReport = runReport(db, selfFavoriteRuckingAo, { requesterName: "Chubbs" });
+  assert.equal(selfFavoriteRuckingAoReport.source, "reporting_db_self");
+  assert.match(selfFavoriteRuckingAoReport.text, /Chubbs's Favorite Rucking AO/);
+  assert.match(selfFavoriteRuckingAoReport.text, /Flyover/);
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
