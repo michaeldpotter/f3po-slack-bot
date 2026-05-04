@@ -339,6 +339,15 @@ try {
   assert.match(selfFirstRuckReport.text, /2026-05-06/);
   assert.doesNotMatch(selfFirstRuckReport.text, /2026-05-02/);
 
+  const selfFavoriteAo = classifyReportRequest("What is my favorite AO?", db, {
+    requesterName: "Chubbs",
+  });
+  assert.equal(selfFavoriteAo?.type, "self_favorite_ao");
+  const selfFavoriteAoReport = runReport(db, selfFavoriteAo, { requesterName: "Chubbs" });
+  assert.equal(selfFavoriteAoReport.source, "reporting_db_self");
+  assert.match(selfFavoriteAoReport.text, /Chubbs's Favorite AO/);
+  assert.match(selfFavoriteAoReport.text, /Depot/);
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
@@ -426,6 +435,14 @@ assert.equal(namedPaxAoSummary.range.label, "this year");
 const namedPaxAoSummaryReport = runReport(db, namedPaxAoSummary, {});
 assert.match(namedPaxAoSummaryReport.text, /AOs Chubbs Has Posted — this year/);
 assert.match(namedPaxAoSummaryReport.text, /Wild West/);
+
+const namedPaxFavoriteAo = classifyReportRequest("What is Hammer Pants favorite AO?", db, {});
+assert.equal(namedPaxFavoriteAo?.type, "pax_favorite_ao");
+assert.equal(namedPaxFavoriteAo.paxName, "Hammer Pants");
+const namedPaxFavoriteAoReport = runReport(db, namedPaxFavoriteAo, {});
+assert.equal(namedPaxFavoriteAoReport.source, "reporting_db_pax");
+assert.match(namedPaxFavoriteAoReport.text, /Hammer Pants's Favorite AO/);
+assert.match(namedPaxFavoriteAoReport.text, /Wild West/);
 
 const namedPaxLastFiveBlocked = classifyReportRequest("show me chubbs last 5 workouts", db, {});
 assert.equal(namedPaxLastFiveBlocked?.type, "blocked_recent_person_attendance");
