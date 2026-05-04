@@ -348,6 +348,22 @@ try {
   assert.match(selfFavoriteAoReport.text, /Chubbs's Favorite AO/);
   assert.match(selfFavoriteAoReport.text, /Depot/);
 
+  const favoriteAoFollowup = classifyReportRequest("What about Hammer Pants?", db, {
+    threadMessages: [
+      {
+        text: selfFavoriteAoReport.text,
+        reportingContext: {
+          type: "pax_favorite_ao",
+        },
+      },
+    ],
+  });
+  assert.equal(favoriteAoFollowup?.type, "pax_favorite_ao");
+  assert.equal(favoriteAoFollowup.paxName, "Hammer Pants");
+  const favoriteAoFollowupReport = runReport(db, favoriteAoFollowup, {});
+  assert.equal(favoriteAoFollowupReport.source, "reporting_db_pax");
+  assert.match(favoriteAoFollowupReport.text, /Hammer Pants's Favorite AO/);
+
   const selfFirstBeatdownInYear = classifyReportRequest("When was my first beatdown in 2024?", db, {
     requesterName: "Chubbs",
   });
